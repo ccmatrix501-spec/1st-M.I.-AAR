@@ -7,21 +7,23 @@ const {
   ButtonBuilder,
   ButtonStyle,
   UserSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  ChannelType,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
   EmbedBuilder,
   Events,
   MessageFlags,
-  PermissionFlagsBits,
-  ChannelType
+  PermissionFlagsBits
 } = require('discord.js');
 const fs = require('fs');
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
@@ -51,13 +53,11 @@ function loadStats() {
   }
   try {
     const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
-    if (typeof data.totalOperations !== 'number') {
-      data.totalOperations = 1;
-    }
+    if (typeof data.totalOperations !== 'number') data.totalOperations = 0;
     if (!data.users) data.users = {};
     return data;
   } catch {
-    return { totalOperations: 1, users: {} };
+    return { totalOperations: 0, users: {} };
   }
 }
 
@@ -68,7 +68,6 @@ function saveStats(stats) {
 let stats = loadStats();
 const pending = new Map();
 
-// Your images
 const VICTORY_IMAGE = 'https://i.imgur.com/D4NGqX2.png';
 const DEFEAT_IMAGE  = 'https://i.imgur.com/uh3NI8g.png';
 
@@ -106,7 +105,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply({ content: 'I need **Manage Channels** permission.' });
       }
 
-      // Private Panel channel
       let panelChannel = config.panelChannelId ? await client.channels.fetch(config.panelChannelId).catch(() => null) : null;
       if (!panelChannel) {
         panelChannel = await guild.channels.create({
@@ -120,7 +118,6 @@ client.on(Events.InteractionCreate, async interaction => {
         config.panelChannelId = panelChannel.id;
       }
 
-      // Private Report channel
       let reportChannel = config.reportChannelId ? await client.channels.fetch(config.reportChannelId).catch(() => null) : null;
       if (!reportChannel) {
         reportChannel = await guild.channels.create({
@@ -161,7 +158,7 @@ client.on(Events.InteractionCreate, async interaction => {
   // ========== /drops ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'drops') {
     const user = interaction.options.getUser('user');
-    const userStats = stats.users[user.id] || { points: 3, operations: 1, lastDrop: null };
+    const userStats = stats.users[user.id] || { points: 0, operations: 0, lastDrop: null };
 
     const lastDropText = userStats.lastDrop
       ? `<t:${Math.floor(new Date(userStats.lastDrop).getTime() / 1000)}:F>`
@@ -184,11 +181,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ========== /1stmidrops ==========
   if (interaction.isChatInputCommand() && interaction.commandName === '1stmidrops') {
-    const totalDrops = stats.totalOperations || 1;
+    const totalDrops = stats.totalOperations || 0;
     let totalPoints = 0;
 
     for (const userId in stats.users) {
-      totalPoints += stats.users[userId].points || 5400;
+      totalPoints += stats.users[userId].points || 0;
     }
 
     const embed = new EmbedBuilder()
@@ -237,25 +234,45 @@ client.on(Events.InteractionCreate, async interaction => {
 
     data.map = MAPS.find(m => m.id === interaction.customId).label;
 
-    const userSelect = new UserSelectMenuBuilder()
-      .setCustomId('aar_users')
-      .setPlaceholder('Select squad members')
-      .setMinValues(1)
-      .setMaxValues(25);
+    // Show Voice Channel selector
+    const channelSelect = new ChannelSelectMenuBuilder()
+      .setCustomId('aar_voice')
+      .setPlaceholder('Select the Voice Channel the squad is in')
+      .addChannelTypes(ChannelType.GuildVoice);
 
     await interaction.update({
-      content: `**${data.mode} → ${data.map}**\nSelect squad:`,
-      components: [new ActionRowBuilder().addComponents(userSelect)]
+      content: `**${data.mode} → ${data.map}**\nSelect the Voice Channel:`,
+      components: [new ActionRowBuilder().addComponents(channelSelect)]
     });
     return;
   }
 
-  // ========== Users ==========
-  if (interaction.isUserSelectMenu() && interaction.customId === 'aar_users') {
+  // ========== Voice Channel Selected ==========
+  if (interaction.isChannelSelectMenu() && interaction.customId === 'aar_voice') {
     const data = pending.get(interaction.user.id);
     if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
 
-    data.users = interaction.values;
+    const voiceChannelId = interaction.values[0];
+    const voiceChannel = await interaction.guild.channels.fetch(voiceChannelId).catch(() => null);
+
+    if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+      return interaction.update({
+        content: 'Invalid voice channel selected. Please try again.',
+        components: []
+      });
+    }
+
+    // Get members currently in the voice channel
+    const membersInVC = [...voiceChannel.members.keys()];
+
+    if (membersInVC.length === 0) {
+      return interaction.update({
+        content: `No one is currently in **${voiceChannel.name}**.\nPlease join the voice channel and try again.`,
+        components: []
+      });
+    }
+
+    data.users = membersInVC;
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('outcome_success').setLabel('Success').setStyle(ButtonStyle.Success),
@@ -263,8 +280,10 @@ client.on(Events.InteractionCreate, async interaction => {
       new ButtonBuilder().setCustomId('outcome_failure').setLabel('Failure').setStyle(ButtonStyle.Danger)
     );
 
+    const memberMentions = membersInVC.map(id => `<@${id}>`).join(' ');
+
     await interaction.update({
-      content: `**${data.mode} → ${data.map}**\nChoose Outcome:`,
+      content: `**${data.mode} → ${data.map}**\nSquad detected in **${voiceChannel.name}**:\n${memberMentions}\n\nChoose Outcome:`,
       components: [row]
     });
     return;
@@ -309,17 +328,16 @@ client.on(Events.InteractionCreate, async interaction => {
     const mission = interaction.fields.getTextInputValue('mission');
     const notes = interaction.fields.getTextInputValue('notes') || 'None';
 
+    // Full Extraction = 3 points
     const pointsPerPerson = data.extracted === 'Yes' ? 3 : 1;
     const now = new Date().toISOString();
 
-    // One report = 1 Dropship for the server
-    if (typeof stats.totalOperations !== 'number') stats.totalOperations = 1;
+    if (typeof stats.totalOperations !== 'number') stats.totalOperations = 0;
     stats.totalOperations += 1;
 
-    // Personal stats
     data.users.forEach(userId => {
       if (!stats.users[userId]) {
-        stats.users[userId] = { points: 3, operations: 1, lastDrop: null };
+        stats.users[userId] = { points: 0, operations: 0, lastDrop: null };
       }
       stats.users[userId].points += pointsPerPerson;
       stats.users[userId].operations += 1;
