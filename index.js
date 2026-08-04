@@ -316,19 +316,8 @@ client.on(Events.InteractionCreate, async interaction => {
     if (typeof stats.totalOperations !== 'number') stats.totalOperations = 0;
     stats.totalOperations += 1;
 
-    // Personal stats (unchanged)
-    data.users.forEach(userId => {
-      if (!stats.users[userId]) {
-        stats.users[userId] = { points: 0, operations: 0, lastDrop: null };
-      }
-      stats.users[userId].points += pointsPerPerson;
-      stats.users[userId].operations += 1;
-      stats.users[userId].lastDrop = now;
-    });
-    saveStats(stats);
-
     const userMentions = data.users.map(id => `<@${id}>`).join(' ');
-    const pointsText = data.extracted === 'Yes' ? '+2 points each' : '+1 point each';
+    const pointsText = data.extracted === 'Yes' ? '+3 points each' : '+1 point each';
     const reportImage = data.extracted === 'Yes' ? VICTORY_IMAGE : DEFEAT_IMAGE;
     const embedColor = data.extracted === 'Yes' ? 0x57F287 : 0xED4245;
 
