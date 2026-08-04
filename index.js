@@ -19,6 +19,13 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 
+const path = require('path');
+
+// Make sure the data folder exists
+if (!fs.existsSync('./data')) {
+  fs.mkdirSync('./data', { recursive: true });
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -32,7 +39,7 @@ const TARGET_GUILD_ID = '1256977709884641382';
 // ================================
 
 const CONFIG_FILE = './config.json';
-const STATS_FILE = './stats.json';
+const STATS_FILE = './data/stats.json';
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) {
