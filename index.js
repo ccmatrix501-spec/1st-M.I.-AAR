@@ -47,12 +47,17 @@ let config = loadConfig();
 
 function loadStats() {
   if (!fs.existsSync(STATS_FILE)) {
-    return { users: {} };
+    return { totalOperations: 0, users: {} };
   }
   try {
-    return JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+    // Make sure totalOperations exists
+    if (typeof data.totalOperations !== 'number') {
+      data.totalOperations = 0;
+    }
+    return data;
   } catch {
-    return { users: {} };
+    return { totalOperations: 0, users: {} };
   }
 }
 
@@ -179,11 +184,10 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ========== /1stmidrops ==========
   if (interaction.isChatInputCommand() && interaction.commandName === '1stmidrops') {
-    let totalDrops = 0;
+    const totalDrops = stats.totalOperations || 0;
     let totalPoints = 0;
 
     for (const userId in stats.users) {
-      totalDrops += stats.users[userId].operations || 0;
       totalPoints += stats.users[userId].points || 0;
     }
 
@@ -308,6 +312,11 @@ client.on(Events.InteractionCreate, async interaction => {
     const pointsPerPerson = data.extracted === 'Yes' ? 2 : 1;
     const now = new Date().toISOString();
 
+    // One report = 1 Dropship for the server
+    if (typeof stats.totalOperations !== 'number') stats.totalOperations = 0;
+    stats.totalOperations += 1;
+
+    // Personal stats (unchanged)
     data.users.forEach(userId => {
       if (!stats.users[userId]) {
         stats.users[userId] = { points: 0, operations: 0, lastDrop: null };
