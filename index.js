@@ -46,8 +46,14 @@ function saveConfig(config) {
 let config = loadConfig();
 
 function loadStats() {
-  // Force reset to zero as requested
-  return { users: {} };
+  if (!fs.existsSync(STATS_FILE)) {
+    return { users: {} };
+  }
+  try {
+    return JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+  } catch {
+    return { users: {} };
+  }
 }
 
 function saveStats(stats) {
@@ -57,7 +63,8 @@ function saveStats(stats) {
 let stats = loadStats();
 const pending = new Map();
 
-const VICTORY_IMAGE = 'https://i.imgur.com/D4NGqX2.jpeg';
+// Your images
+const VICTORY_IMAGE = 'https://i.imgur.com/D4NGqX2.png';
 const DEFEAT_IMAGE  = 'https://i.imgur.com/uh3NI8g.png';
 
 const GAME_MODES = [
@@ -77,8 +84,6 @@ const MAPS = [
 
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
-  // Overwrite stats file with empty data (reset)
-  saveStats({ users: {} });
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -139,7 +144,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await panelChannel.send({ embeds: [panelEmbed], components: [row] });
 
       return interaction.editReply({
-        content: `✅ Setup complete!\nBoth channels are private.\nPanel: ${panelChannel}\nReports: ${reportChannel}`
+        content: `✅ Setup complete!\nPanel: ${panelChannel}\nReports: ${reportChannel}`
       });
 
     } catch (err) {
@@ -163,11 +168,34 @@ client.on(Events.InteractionCreate, async interaction => {
       .setDescription(`**${user}**`)
       .addFields(
         { name: 'Points', value: `**${userStats.points}**`, inline: true },
-        { name: 'Operations', value: `**${userStats.operations}**`, inline: true },
+        { name: 'Total Dropships', value: `**${userStats.operations}**`, inline: true },
         { name: 'Last Dropship', value: lastDropText, inline: true }
       )
       .setThumbnail(user.displayAvatarURL())
       .setFooter({ text: '1st M.I.' });
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  // ========== /1stmidrops ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === '1stmidrops') {
+    let totalDrops = 0;
+    let totalPoints = 0;
+
+    for (const userId in stats.users) {
+      totalDrops += stats.users[userId].operations || 0;
+      totalPoints += stats.users[userId].points || 0;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('1st M.I. — Server Dropship Record')
+      .setColor(0x5865F2)
+      .addFields(
+        { name: 'Total Dropships', value: `**${totalDrops}**`, inline: true },
+        { name: 'Total Points Awarded', value: `**${totalPoints}**`, inline: true }
+      )
+      .setFooter({ text: '1st M.I.' })
+      .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
   }
@@ -277,8 +305,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const mission = interaction.fields.getTextInputValue('mission');
     const notes = interaction.fields.getTextInputValue('notes') || 'None';
 
-    // New scoring: Full Extraction = 3 points, otherwise 1 point
-    const pointsPerPerson = data.extracted === 'Yes' ? 3 : 1;
+    const pointsPerPerson = data.extracted === 'Yes' ? 2 : 1;
     const now = new Date().toISOString();
 
     data.users.forEach(userId => {
@@ -292,7 +319,7 @@ client.on(Events.InteractionCreate, async interaction => {
     saveStats(stats);
 
     const userMentions = data.users.map(id => `<@${id}>`).join(' ');
-    const pointsText = data.extracted === 'Yes' ? '+3 points each' : '+1 point each';
+    const pointsText = data.extracted === 'Yes' ? '+2 points each' : '+1 point each';
     const reportImage = data.extracted === 'Yes' ? VICTORY_IMAGE : DEFEAT_IMAGE;
     const embedColor = data.extracted === 'Yes' ? 0x57F287 : 0xED4245;
 
@@ -362,11 +389,18 @@ async function showModal(interaction, data) {
 
 client.on(Events.ClientReady, async () => {
   await client.application.commands.set([
-    new SlashCommandBuilder().setName('setup').setDescription('Create private AAR panel + report channels'),
+    new SlashCommandBuilder()
+      .setName('setup')
+      .setDescription('Create private AAR panel + report channels'),
+
     new SlashCommandBuilder()
       .setName('drops')
-      .setDescription('Check points and operations of a member')
-      .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true))
+      .setDescription('Check points and total dropships of a member')
+      .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName('1stmidrops')
+      .setDescription('Show total dropships for the entire server')
   ]);
   console.log('Slash commands registered');
 });
