@@ -52,12 +52,12 @@ function loadStats() {
   try {
     const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
     if (typeof data.totalOperations !== 'number') {
-      data.totalOperations = 0;
+      data.totalOperations = 1;
     }
     if (!data.users) data.users = {};
     return data;
   } catch {
-    return { totalOperations: 0, users: {} };
+    return { totalOperations: 1, users: {} };
   }
 }
 
@@ -161,7 +161,7 @@ client.on(Events.InteractionCreate, async interaction => {
   // ========== /drops ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'drops') {
     const user = interaction.options.getUser('user');
-    const userStats = stats.users[user.id] || { points: 0, operations: 0, lastDrop: null };
+    const userStats = stats.users[user.id] || { points: 3, operations: 1, lastDrop: null };
 
     const lastDropText = userStats.lastDrop
       ? `<t:${Math.floor(new Date(userStats.lastDrop).getTime() / 1000)}:F>`
@@ -184,11 +184,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ========== /1stmidrops ==========
   if (interaction.isChatInputCommand() && interaction.commandName === '1stmidrops') {
-    const totalDrops = stats.totalOperations || 0;
+    const totalDrops = stats.totalOperations || 1;
     let totalPoints = 0;
 
     for (const userId in stats.users) {
-      totalPoints += stats.users[userId].points || 0;
+      totalPoints += stats.users[userId].points || 5400;
     }
 
     const embed = new EmbedBuilder()
@@ -309,17 +309,17 @@ client.on(Events.InteractionCreate, async interaction => {
     const mission = interaction.fields.getTextInputValue('mission');
     const notes = interaction.fields.getTextInputValue('notes') || 'None';
 
-    const pointsPerPerson = data.extracted === 'Yes' ? 2 : 1;
+    const pointsPerPerson = data.extracted === 'Yes' ? 3 : 1;
     const now = new Date().toISOString();
 
     // One report = 1 Dropship for the server
-    if (typeof stats.totalOperations !== 'number') stats.totalOperations = 0;
+    if (typeof stats.totalOperations !== 'number') stats.totalOperations = 1;
     stats.totalOperations += 1;
 
     // Personal stats
     data.users.forEach(userId => {
       if (!stats.users[userId]) {
-        stats.users[userId] = { points: 0, operations: 0, lastDrop: null };
+        stats.users[userId] = { points: 3, operations: 1, lastDrop: null };
       }
       stats.users[userId].points += pointsPerPerson;
       stats.users[userId].operations += 1;
@@ -328,7 +328,7 @@ client.on(Events.InteractionCreate, async interaction => {
     saveStats(stats);
 
     const userMentions = data.users.map(id => `<@${id}>`).join(' ');
-    const pointsText = data.extracted === 'Yes' ? '+2 points each' : '+1 point each';
+    const pointsText = data.extracted === 'Yes' ? '+3 points each' : '+1 point each';
     const reportImage = data.extracted === 'Yes' ? VICTORY_IMAGE : DEFEAT_IMAGE;
     const embedColor = data.extracted === 'Yes' ? 0x57F287 : 0xED4245;
 
