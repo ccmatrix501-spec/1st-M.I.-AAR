@@ -57,8 +57,8 @@ function saveStats(stats) {
 let stats = loadStats();
 const pending = new Map();
 
-const VICTORY_IMAGE = 'https://imgur.com/D4NGqX2';
-const DEFEAT_IMAGE  = 'https://imgur.com/uh3NI8g';
+const VICTORY_IMAGE = 'https://i.imgur.com/D4NGqX2.jpeg';
+const DEFEAT_IMAGE  = 'https://i.imgur.com/uh3NI8g.png';
 
 const GAME_MODES = [
   { id: 'mode_arc', label: 'ARC' },
