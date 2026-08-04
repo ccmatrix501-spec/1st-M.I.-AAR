@@ -19,13 +19,6 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 
-const path = require('path');
-
-// Make sure the data folder exists
-if (!fs.existsSync('./data')) {
-  fs.mkdirSync('./data', { recursive: true });
-}
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -34,10 +27,7 @@ const client = new Client({
   ]
 });
 
-// ========== YOUR SERVER ==========
 const TARGET_GUILD_ID = '1256977709884641382';
-// ================================
-
 const CONFIG_FILE = './config.json';
 const STATS_FILE = './data/stats.json';
 
@@ -53,6 +43,10 @@ function saveConfig(config) {
 }
 
 let config = loadConfig();
+
+if (!fs.existsSync('./data')) {
+  fs.mkdirSync('./data', { recursive: true });
+}
 
 function loadStats() {
   if (!fs.existsSync(STATS_FILE)) {
@@ -241,10 +235,27 @@ client.on(Events.InteractionCreate, async interaction => {
 
     data.map = MAPS.find(m => m.id === interaction.customId).label;
 
-    // Show Voice Channel selector
+    // Give choice: Voice Channel or Manual Select
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('method_voice').setLabel('Select Voice Channel').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('method_manual').setLabel('Select People Manually').setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content: `**${data.mode} → ${data.map}**\nHow do you want to select the squad?`,
+      components: [row]
+    });
+    return;
+  }
+
+  // ========== Method: Voice Channel ==========
+  if (interaction.isButton() && interaction.customId === 'method_voice') {
+    const data = pending.get(interaction.user.id);
+    if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
+
     const channelSelect = new ChannelSelectMenuBuilder()
       .setCustomId('aar_voice')
-      .setPlaceholder('Select the Voice Channel the squad is in')
+      .setPlaceholder('Select the Voice Channel')
       .addChannelTypes(ChannelType.GuildVoice);
 
     await interaction.update({
@@ -254,27 +265,40 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
+  // ========== Method: Manual Select ==========
+  if (interaction.isButton() && interaction.customId === 'method_manual') {
+    const data = pending.get(interaction.user.id);
+    if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
+
+    const userSelect = new UserSelectMenuBuilder()
+      .setCustomId('aar_users')
+      .setPlaceholder('Select squad members')
+      .setMinValues(1)
+      .setMaxValues(25);
+
+    await interaction.update({
+      content: `**${data.mode} → ${data.map}**\nSelect the people:`,
+      components: [new ActionRowBuilder().addComponents(userSelect)]
+    });
+    return;
+  }
+
   // ========== Voice Channel Selected ==========
   if (interaction.isChannelSelectMenu() && interaction.customId === 'aar_voice') {
     const data = pending.get(interaction.user.id);
     if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
 
-    const voiceChannelId = interaction.values[0];
-    const voiceChannel = await interaction.guild.channels.fetch(voiceChannelId).catch(() => null);
+    const voiceChannel = await interaction.guild.channels.fetch(interaction.values[0]).catch(() => null);
 
     if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
-      return interaction.update({
-        content: 'Invalid voice channel selected. Please try again.',
-        components: []
-      });
+      return interaction.update({ content: 'Invalid voice channel.', components: [] });
     }
 
-    // Get members currently in the voice channel
     const membersInVC = [...voiceChannel.members.keys()];
 
     if (membersInVC.length === 0) {
       return interaction.update({
-        content: `No one is currently in **${voiceChannel.name}**.\nPlease join the voice channel and try again.`,
+        content: `No one is in **${voiceChannel.name}**.`,
         components: []
       });
     }
@@ -290,7 +314,27 @@ client.on(Events.InteractionCreate, async interaction => {
     const memberMentions = membersInVC.map(id => `<@${id}>`).join(' ');
 
     await interaction.update({
-      content: `**${data.mode} → ${data.map}**\nSquad detected in **${voiceChannel.name}**:\n${memberMentions}\n\nChoose Outcome:`,
+      content: `**${data.mode} → ${data.map}**\nSquad from **${voiceChannel.name}**:\n${memberMentions}\n\nChoose Outcome:`,
+      components: [row]
+    });
+    return;
+  }
+
+  // ========== Manual Users Selected ==========
+  if (interaction.isUserSelectMenu() && interaction.customId === 'aar_users') {
+    const data = pending.get(interaction.user.id);
+    if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
+
+    data.users = interaction.values;
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('outcome_success').setLabel('Success').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('outcome_partial').setLabel('Partial').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('outcome_failure').setLabel('Failure').setStyle(ButtonStyle.Danger)
+    );
+
+    await interaction.update({
+      content: `**${data.mode} → ${data.map}**\nChoose Outcome:`,
       components: [row]
     });
     return;
@@ -306,12 +350,12 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.customId === 'outcome_failure') data.outcome = 'Failure';
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('extract_yes').setLabel('Full Extraction').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('extract_no').setLabel('No Extraction').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('extract_yes').setLabel('Yes').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('extract_no').setLabel('No').setStyle(ButtonStyle.Danger)
     );
 
     await interaction.update({
-      content: `**${data.mode} → ${data.map} → ${data.outcome}**\nExtraction:`,
+      content: `**${data.mode} → ${data.map} → ${data.outcome}**\nWas it a full extract?`,
       components: [row]
     });
     return;
@@ -335,7 +379,6 @@ client.on(Events.InteractionCreate, async interaction => {
     const mission = interaction.fields.getTextInputValue('mission');
     const notes = interaction.fields.getTextInputValue('notes') || 'None';
 
-    // Full Extraction = 3 points
     const pointsPerPerson = data.extracted === 'Yes' ? 3 : 1;
     const now = new Date().toISOString();
 
@@ -357,7 +400,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const reportImage = data.extracted === 'Yes' ? VICTORY_IMAGE : DEFEAT_IMAGE;
     const embedColor = data.extracted === 'Yes' ? 0x57F287 : 0xED4245;
 
-    const embed = new EmbedBuilder()
+    const reportEmbed = new EmbedBuilder()
       .setTitle(`After Action Report — ${data.mode}`)
       .setColor(embedColor)
       .setImage(reportImage)
@@ -366,7 +409,7 @@ client.on(Events.InteractionCreate, async interaction => {
         { name: 'Map', value: data.map, inline: true },
         { name: 'Mission', value: mission, inline: true },
         { name: 'Outcome', value: data.outcome, inline: true },
-        { name: 'Everyone Extracted?', value: data.extracted, inline: true },
+        { name: 'Full Extract?', value: data.extracted, inline: true },
         { name: 'Points Awarded', value: pointsText, inline: true },
         { name: 'Squad', value: userMentions },
         { name: 'Notes / Debrief', value: notes }
@@ -374,10 +417,29 @@ client.on(Events.InteractionCreate, async interaction => {
       .setFooter({ text: `Reported by ${interaction.user.tag}` })
       .setTimestamp();
 
+    // Server total embed
+    let totalPoints = 0;
+    for (const userId in stats.users) {
+      totalPoints += stats.users[userId].points || 0;
+    }
+
+    const totalEmbed = new EmbedBuilder()
+      .setTitle('1st M.I. — Server Dropship Record')
+      .setColor(0x5865F2)
+      .addFields(
+        { name: 'Total Dropships', value: `**${stats.totalOperations}**`, inline: true },
+        { name: 'Total Points Awarded', value: `**${totalPoints}**`, inline: true }
+      )
+      .setFooter({ text: '1st M.I.' })
+      .setTimestamp();
+
     try {
       if (config.reportChannelId) {
         const ch = await client.channels.fetch(config.reportChannelId);
-        if (ch) await ch.send({ embeds: [embed] });
+        if (ch) {
+          await ch.send({ embeds: [reportEmbed] });
+          await ch.send({ embeds: [totalEmbed] });
+        }
       }
     } catch (err) {
       console.error('Failed to send report:', err);
