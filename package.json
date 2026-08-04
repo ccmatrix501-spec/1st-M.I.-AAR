@@ -1,7 +1,6 @@
 {
   "name": "aar-bot",
   "version": "1.0.0",
-  "description": "After Action Report + Dropship Counter bot for 1st M.I. Shadows",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
