@@ -609,44 +609,52 @@ async function showModal(interaction, data) {
   await interaction.showModal(modal);
 }
 
+// ========== REGISTER COMMANDS FOR THE SERVER (instant) ==========
 client.on(Events.ClientReady, async () => {
-  await client.application.commands.set([
-    new SlashCommandBuilder()
-      .setName('setup')
-      .setDescription('Create private AAR panel + report channels'),
+  try {
+    const guild = await client.guilds.fetch(TARGET_GUILD_ID);
 
-    new SlashCommandBuilder()
-      .setName('drops')
-      .setDescription('Check points and total dropships of a member')
-      .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
+    await guild.commands.set([
+      new SlashCommandBuilder()
+        .setName('setup')
+        .setDescription('Create private AAR panel + report channels'),
 
-    new SlashCommandBuilder()
-      .setName('1stmidrops')
-      .setDescription('Show total dropships for the entire server'),
+      new SlashCommandBuilder()
+        .setName('drops')
+        .setDescription('Check points and total dropships of a member')
+        .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
 
-    new SlashCommandBuilder()
-      .setName('servermembers')
-      .setDescription('List all members who have points/dropships'),
+      new SlashCommandBuilder()
+        .setName('1stmidrops')
+        .setDescription('Show total dropships for the entire server'),
 
-    new SlashCommandBuilder()
-      .setName('setstats')
-      .setDescription('Manually set a member\'s points and dropships')
-      .addUserOption(opt => opt.setName('user').setDescription('The member').setRequired(true))
-      .addIntegerOption(opt => opt.setName('points').setDescription('New points value').setRequired(false))
-      .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('servermembers')
+        .setDescription('List all members who have points/dropships'),
 
-    new SlashCommandBuilder()
-      .setName('settotal')
-      .setDescription('Set the server Total Dropships number')
-      .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('setstats')
+        .setDescription('Manually set a member\'s points and dropships')
+        .addUserOption(opt => opt.setName('user').setDescription('The member').setRequired(true))
+        .addIntegerOption(opt => opt.setName('points').setDescription('New points value').setRequired(false))
+        .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false)),
 
-    new SlashCommandBuilder()
-      .setName('setall')
-      .setDescription('Set Points and Dropships for EVERYONE at once')
-      .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
-      .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false))
-  ]);
-  console.log('Slash commands registered');
+      new SlashCommandBuilder()
+        .setName('settotal')
+        .setDescription('Set the server Total Dropships number')
+        .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true)),
+
+      new SlashCommandBuilder()
+        .setName('setall')
+        .setDescription('Set Points and Dropships for EVERYONE at once')
+        .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
+        .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false))
+    ]);
+
+    console.log('Slash commands registered for the server (instant)');
+  } catch (err) {
+    console.error('Failed to register guild commands:', err);
+  }
 });
 
 client.login(process.env.TOKEN);
