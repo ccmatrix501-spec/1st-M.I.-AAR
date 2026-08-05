@@ -29,18 +29,24 @@ const client = new Client({
 });
 
 const TARGET_GUILD_ID = '1256977709884641382';
+
+// ========== HARDCODED CHANNELS ==========
+const PANEL_CHANNEL_ID = '1533983126970433677';   // Questions / Starting buttons
+const REPORT_CHANNEL_ID = '1533983132464840765';  // After Action Reports
+// =======================================
+
 const CONFIG_FILE = './config.json';
 const STATS_FILE = './data/stats.json';
 
 function loadConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) {
-    return { panelChannelId: null, reportChannelId: null };
-  }
-  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  return {
+    panelChannelId: PANEL_CHANNEL_ID,
+    reportChannelId: REPORT_CHANNEL_ID
+  };
 }
 
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  // Channels are hardcoded, so we don't need to save them
 }
 
 let config = loadConfig();
@@ -126,41 +132,10 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-      const guild = await client.guilds.fetch(TARGET_GUILD_ID);
-      if (!guild) return interaction.editReply({ content: 'Could not find the target server.' });
-
-      const me = await guild.members.fetchMe();
-      if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) {
-        return interaction.editReply({ content: 'I need **Manage Channels** permission.' });
-      }
-
-      let panelChannel = config.panelChannelId ? await client.channels.fetch(config.panelChannelId).catch(() => null) : null;
+      const panelChannel = await client.channels.fetch(PANEL_CHANNEL_ID);
       if (!panelChannel) {
-        panelChannel = await guild.channels.create({
-          name: 'aar-panel',
-          type: ChannelType.GuildText,
-          permissionOverwrites: [
-            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] }
-          ]
-        });
-        config.panelChannelId = panelChannel.id;
+        return interaction.editReply({ content: 'Could not find the panel channel.' });
       }
-
-      let reportChannel = config.reportChannelId ? await client.channels.fetch(config.reportChannelId).catch(() => null) : null;
-      if (!reportChannel) {
-        reportChannel = await guild.channels.create({
-          name: 'after-action-reports',
-          type: ChannelType.GuildText,
-          permissionOverwrites: [
-            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] }
-          ]
-        });
-        config.reportChannelId = reportChannel.id;
-      }
-
-      saveConfig(config);
 
       const row = new ActionRowBuilder();
       GAME_MODES.forEach(mode => {
@@ -175,7 +150,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await panelChannel.send({ embeds: [panelEmbed], components: [row] });
 
       return interaction.editReply({
-        content: `✅ Setup complete!\nPanel: ${panelChannel}\nReports: ${reportChannel}`
+        content: `✅ Panel posted in <#${PANEL_CHANNEL_ID}>\nReports will go to <#${REPORT_CHANNEL_ID}>`
       });
 
     } catch (err) {
@@ -560,12 +535,10 @@ client.on(Events.InteractionCreate, async interaction => {
       .setTimestamp();
 
     try {
-      if (config.reportChannelId) {
-        const ch = await client.channels.fetch(config.reportChannelId);
-        if (ch) {
-          await ch.send({ embeds: [reportEmbed] });
-          await ch.send({ embeds: [totalEmbed] });
-        }
+      const ch = await client.channels.fetch(REPORT_CHANNEL_ID);
+      if (ch) {
+        await ch.send({ embeds: [reportEmbed] });
+        await ch.send({ embeds: [totalEmbed] });
       }
     } catch (err) {
       console.error('Failed to send report:', err);
@@ -617,7 +590,7 @@ client.on(Events.ClientReady, async () => {
     await guild.commands.set([
       new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('Create private AAR panel + report channels'),
+        .setDescription('Post the AAR panel in the questions channel'),
 
       new SlashCommandBuilder()
         .setName('drops')
