@@ -232,13 +232,16 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ========== /servermembers ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'servermembers') {
-    const entries = Object.entries(stats.users);
+    const entries = Object.entries(stats.users || {});
 
     if (entries.length === 0) {
-      return interaction.reply({ content: 'No members have any stats yet.', flags: MessageFlags.Ephemeral });
+      return interaction.reply({
+        content: 'No members currently have any stats recorded.',
+        flags: MessageFlags.Ephemeral
+      });
     }
 
-    // Sort by points descending
+    // Sort by points (highest first)
     entries.sort((a, b) => (b[1].points || 0) - (a[1].points || 0));
 
     let description = '';
@@ -246,16 +249,15 @@ client.on(Events.InteractionCreate, async interaction => {
       description += `<@${userId}> — **${data.points || 0}** pts | **${data.operations || 0}** drops\n`;
     }
 
-    // Discord embeds have a 4096 character limit
     if (description.length > 4000) {
-      description = description.slice(0, 4000) + '\n...and more';
+      description = description.substring(0, 4000) + '\n... (list truncated)';
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('1st M.I. — Member Stats')
+      .setTitle('1st M.I. — All Member Stats')
       .setDescription(description)
       .setColor(0x5865F2)
-      .setFooter({ text: `Total members with stats: ${entries.length}` });
+      .setFooter({ text: `Members with stats: ${entries.length}` });
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
@@ -276,13 +278,28 @@ client.on(Events.InteractionCreate, async interaction => {
     saveStats(stats);
 
     const embed = new EmbedBuilder()
-      .setTitle('Stats Updated')
+      .setTitle('Member Stats Updated')
       .setColor(0x57F287)
-      .setDescription(`Updated stats for **${user}**`)
+      .setDescription(`Updated **${user}**`)
       .addFields(
         { name: 'Points', value: `**${stats.users[user.id].points}**`, inline: true },
         { name: 'Dropships', value: `**${stats.users[user.id].operations}**`, inline: true }
       );
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+
+  // ========== /settotal ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'settotal') {
+    const total = interaction.options.getInteger('total');
+
+    stats.totalOperations = total;
+    saveStats(stats);
+
+    const embed = new EmbedBuilder()
+      .setTitle('Server Total Updated')
+      .setColor(0x57F287)
+      .setDescription(`Server **Total Dropships** has been set to **${total}**`);
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
@@ -590,7 +607,12 @@ client.on(Events.ClientReady, async () => {
       .setDescription('Manually set a member\'s points and dropships')
       .addUserOption(opt => opt.setName('user').setDescription('The member').setRequired(true))
       .addIntegerOption(opt => opt.setName('points').setDescription('New points value').setRequired(false))
-      .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false))
+      .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false)),
+
+    new SlashCommandBuilder()
+      .setName('settotal')
+      .setDescription('Set the server Total Dropships number')
+      .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true))
   ]);
   console.log('Slash commands registered');
 });
