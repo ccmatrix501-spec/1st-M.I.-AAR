@@ -1,17 +1,12 @@
-# 1st M.I. Shadows — AAR Bot
+# 1st M.I. After Action Report Bot
 
-## How to run
+## Local Setup
+1. Copy `.env.example` to `.env` and add your bot token
+2. npm install
+3. node index.js
 
-1. Rename `.env.example` to `.env`
-2. Open `.env` and put your bot token after `TOKEN=`
-3. Open a terminal in this folder and run:
-
-```bash
-npm install
-node index.js
-```
-
-## Commands
-
-- `/aar` → Create an After Action Report (select map + people)
-- `/drops @user` → Check how many dropships a member has done
+## Railway Settings
+- Start Command: `node index.js`
+- Build Command: leave empty (or `npm install`)
+- Volume Mount Path: `/app/data`
+- Public Domain: generate one and use port from process.env.PORT
