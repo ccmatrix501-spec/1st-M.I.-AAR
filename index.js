@@ -84,6 +84,13 @@ const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
+  // Health check for Railway
+  if (req.url === '/' || req.url === '/health') {
+    res.statusCode = 200;
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+
   if (req.url === '/stats') {
     let totalPoints = 0;
     for (const userId in stats.users) {
@@ -93,6 +100,11 @@ const server = http.createServer((req, res) => {
       totalDropships: stats.totalOperations || 0,
       totalPoints: totalPoints
     }));
+  } else {
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'Not found' }));
+  }
+});
   } else {
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'Not found' }));
