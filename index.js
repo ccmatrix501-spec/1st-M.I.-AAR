@@ -28,22 +28,13 @@ const client = new Client({
   ]
 });
 
+// ========== MAIN SERVER ==========
 const TARGET_GUILD_ID = '1256977709884641382';
-const CONFIG_FILE = './config.json';
+const PANEL_CHANNEL_ID = '1533983126970433677';
+const REPORT_CHANNEL_ID = '1533983132464840765';
+// =================================
+
 const STATS_FILE = './data/stats.json';
-
-function loadConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) {
-    return { panelChannelId: null, reportChannelId: null };
-  }
-  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-}
-
-function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-let config = loadConfig();
 
 if (!fs.existsSync('./data')) {
   fs.mkdirSync('./data', { recursive: true });
@@ -71,7 +62,7 @@ let stats = loadStats();
 const pending = new Map();
 
 const VICTORY_IMAGE = 'https://i.imgur.com/D4NGqX2.png';
-const DEFEAT_IMAGE  = 'https://i.imgur.com/uh3NI8g.png';
+const DEFEAT_IMAGE = 'https://i.imgur.com/uh3NI8g.png';
 
 const GAME_MODES = [
   { id: 'mode_arc', label: 'ARC' },
@@ -88,17 +79,22 @@ const MAPS = [
   { id: 'map_sparta', label: 'Sparta' }
 ];
 
-// ========== LIVE STATS API ==========
+// ========== LIVE STATS API + HEALTH CHECK ==========
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
+
+  if (req.url === '/' || req.url === '/health') {
+    res.statusCode = 200;
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
 
   if (req.url === '/stats') {
     let totalPoints = 0;
     for (const userId in stats.users) {
       totalPoints += stats.users[userId].points || 0;
     }
-
     res.end(JSON.stringify({
       totalDropships: stats.totalOperations || 0,
       totalPoints: totalPoints
@@ -114,7 +110,6 @@ server.listen(PORT, () => {
   console.log(`Stats API running on port ${PORT}`);
 });
 
-// ========== DISCORD BOT ==========
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
@@ -126,45 +121,19 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-      const guild = await client.guilds.fetch(TARGET_GUILD_ID);
-      if (!guild) return interaction.editReply({ content: 'Could not find the target server.' });
-
-      const me = await guild.members.fetchMe();
-      if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) {
-        return interaction.editReply({ content: 'I need **Manage Channels** permission.' });
-      }
-
-      let panelChannel = config.panelChannelId ? await client.channels.fetch(config.panelChannelId).catch(() => null) : null;
+      const panelChannel = await client.channels.fetch(PANEL_CHANNEL_ID);
       if (!panelChannel) {
-        panelChannel = await guild.channels.create({
-          name: 'aar-panel',
-          type: ChannelType.GuildText,
-          permissionOverwrites: [
-            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] }
-          ]
-        });
-        config.panelChannelId = panelChannel.id;
+        return interaction.editReply({ content: 'Could not find the panel channel.' });
       }
-
-      let reportChannel = config.reportChannelId ? await client.channels.fetch(config.reportChannelId).catch(() => null) : null;
-      if (!reportChannel) {
-        reportChannel = await guild.channels.create({
-          name: 'after-action-reports',
-          type: ChannelType.GuildText,
-          permissionOverwrites: [
-            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] }
-          ]
-        });
-        config.reportChannelId = reportChannel.id;
-      }
-
-      saveConfig(config);
 
       const row = new ActionRowBuilder();
       GAME_MODES.forEach(mode => {
-        row.addComponents(new ButtonBuilder().setCustomId(mode.id).setLabel(mode.label).setStyle(ButtonStyle.Primary));
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(mode.id)
+            .setLabel(mode.label)
+            .setStyle(ButtonStyle.Primary)
+        );
       });
 
       const panelEmbed = new EmbedBuilder()
@@ -175,9 +144,8 @@ client.on(Events.InteractionCreate, async interaction => {
       await panelChannel.send({ embeds: [panelEmbed], components: [row] });
 
       return interaction.editReply({
-        content: `✅ Setup complete!\nPanel: ${panelChannel}\nReports: ${reportChannel}`
+        content: `✅ Panel posted in <#${PANEL_CHANNEL_ID}>\nReports go to <#${REPORT_CHANNEL_ID}>`
       });
-
     } catch (err) {
       console.error(err);
       return interaction.editReply({ content: `Error: ${err.message}` });
@@ -212,7 +180,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isChatInputCommand() && interaction.commandName === '1stmidrops') {
     const totalDrops = stats.totalOperations || 0;
     let totalPoints = 0;
-
     for (const userId in stats.users) {
       totalPoints += stats.users[userId].points || 0;
     }
@@ -232,33 +199,38 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ========== /servermembers ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'servermembers') {
-    const entries = Object.entries(stats.users || {});
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (entries.length === 0) {
-      return interaction.reply({
-        content: 'No members currently have any stats recorded.',
-        flags: MessageFlags.Ephemeral
-      });
+    try {
+      const guild = await client.guilds.fetch(TARGET_GUILD_ID);
+      await guild.members.fetch();
+
+      const entries = Object.entries(stats.users || {});
+      if (entries.length === 0) {
+        return interaction.editReply({ content: 'No members currently have any stats recorded.' });
+      }
+
+      entries.sort((a, b) => (b[1].points || 0) - (a[1].points || 0));
+
+      let description = '';
+      for (const [userId, data] of entries) {
+        description += `<@${userId}> — **${data.points || 0}** pts | **${data.operations || 0}** drops\n`;
+      }
+      if (description.length > 4000) {
+        description = description.substring(0, 4000) + '\n... (list truncated)';
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('1st M.I. — All Member Stats')
+        .setDescription(description)
+        .setColor(0x5865F2)
+        .setFooter({ text: `Members with stats: ${entries.length}` });
+
+      return interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+      return interaction.editReply({ content: `Error: ${err.message}` });
     }
-
-    entries.sort((a, b) => (b[1].points || 0) - (a[1].points || 0));
-
-    let description = '';
-    for (const [userId, data] of entries) {
-      description += `<@${userId}> — **${data.points || 0}** pts | **${data.operations || 0}** drops\n`;
-    }
-
-    if (description.length > 4000) {
-      description = description.substring(0, 4000) + '\n... (list truncated)';
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle('1st M.I. — All Member Stats')
-      .setDescription(description)
-      .setColor(0x5865F2)
-      .setFooter({ text: `Members with stats: ${entries.length}` });
-
-    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 
   // ========== /setstats ==========
@@ -291,7 +263,6 @@ client.on(Events.InteractionCreate, async interaction => {
   // ========== /settotal ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'settotal') {
     const total = interaction.options.getInteger('total');
-
     stats.totalOperations = total;
     saveStats(stats);
 
@@ -305,29 +276,44 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // ========== /setall ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'setall') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const points = interaction.options.getInteger('points');
     const operations = interaction.options.getInteger('operations');
 
-    let count = 0;
+    try {
+      const guild = await client.guilds.fetch(TARGET_GUILD_ID);
+      await guild.members.fetch();
 
-    for (const userId in stats.users) {
-      if (points !== null) stats.users[userId].points = points;
-      if (operations !== null) stats.users[userId].operations = operations;
-      count++;
+      let count = 0;
+      guild.members.cache.forEach(member => {
+        if (member.user.bot) return;
+
+        if (!stats.users[member.id]) {
+          stats.users[member.id] = { points: 0, operations: 0, lastDrop: null };
+        }
+
+        if (points !== null) stats.users[member.id].points = points;
+        if (operations !== null) stats.users[member.id].operations = operations;
+        count++;
+      });
+
+      saveStats(stats);
+
+      const embed = new EmbedBuilder()
+        .setTitle('All Member Stats Updated')
+        .setColor(0x57F287)
+        .setDescription(`Updated **${count}** members from the main server (including offline)`)
+        .addFields(
+          { name: 'Points set to', value: points !== null ? `**${points}**` : 'Unchanged', inline: true },
+          { name: 'Dropships set to', value: operations !== null ? `**${operations}**` : 'Unchanged', inline: true }
+        );
+
+      return interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+      return interaction.editReply({ content: `Error: ${err.message}` });
     }
-
-    saveStats(stats);
-
-    const embed = new EmbedBuilder()
-      .setTitle('All Member Stats Updated')
-      .setColor(0x57F287)
-      .setDescription(`Updated **${count}** members`)
-      .addFields(
-        { name: 'Points set to', value: points !== null ? `**${points}**` : 'Unchanged', inline: true },
-        { name: 'Dropships set to', value: operations !== null ? `**${operations}**` : 'Unchanged', inline: true }
-      );
-
-    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 
   // ========== Game Mode ==========
@@ -416,13 +402,11 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
 
     const voiceChannel = await interaction.guild.channels.fetch(interaction.values[0]).catch(() => null);
-
     if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
       return interaction.update({ content: 'Invalid voice channel.', components: [] });
     }
 
     const membersInVC = [...voiceChannel.members.keys()];
-
     if (membersInVC.length === 0) {
       return interaction.update({
         content: `No one is in **${voiceChannel.name}**.`,
@@ -560,12 +544,10 @@ client.on(Events.InteractionCreate, async interaction => {
       .setTimestamp();
 
     try {
-      if (config.reportChannelId) {
-        const ch = await client.channels.fetch(config.reportChannelId);
-        if (ch) {
-          await ch.send({ embeds: [reportEmbed] });
-          await ch.send({ embeds: [totalEmbed] });
-        }
+      const ch = await client.channels.fetch(REPORT_CHANNEL_ID);
+      if (ch) {
+        await ch.send({ embeds: [reportEmbed] });
+        await ch.send({ embeds: [totalEmbed] });
       }
     } catch (err) {
       console.error('Failed to send report:', err);
@@ -609,7 +591,7 @@ async function showModal(interaction, data) {
   await interaction.showModal(modal);
 }
 
-// ========== REGISTER COMMANDS FOR THE SERVER (instant) ==========
+// Register commands on the main server
 client.on(Events.ClientReady, async () => {
   try {
     const guild = await client.guilds.fetch(TARGET_GUILD_ID);
@@ -617,7 +599,7 @@ client.on(Events.ClientReady, async () => {
     await guild.commands.set([
       new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('Create private AAR panel + report channels'),
+        .setDescription('Post the AAR panel in the questions channel'),
 
       new SlashCommandBuilder()
         .setName('drops')
@@ -646,14 +628,14 @@ client.on(Events.ClientReady, async () => {
 
       new SlashCommandBuilder()
         .setName('setall')
-        .setDescription('Set Points and Dropships for EVERYONE at once')
+        .setDescription('Set Points and Dropships for EVERYONE in the main server')
         .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
         .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false))
     ]);
 
-    console.log('Slash commands registered for the server (instant)');
+    console.log('Slash commands registered for the main server');
   } catch (err) {
-    console.error('Failed to register guild commands:', err);
+    console.error('Failed to register commands:', err);
   }
 });
 
