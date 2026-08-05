@@ -241,7 +241,6 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // Sort by points (highest first)
     entries.sort((a, b) => (b[1].points || 0) - (a[1].points || 0));
 
     let description = '';
@@ -300,6 +299,33 @@ client.on(Events.InteractionCreate, async interaction => {
       .setTitle('Server Total Updated')
       .setColor(0x57F287)
       .setDescription(`Server **Total Dropships** has been set to **${total}**`);
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+
+  // ========== /setall ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'setall') {
+    const points = interaction.options.getInteger('points');
+    const operations = interaction.options.getInteger('operations');
+
+    let count = 0;
+
+    for (const userId in stats.users) {
+      if (points !== null) stats.users[userId].points = points;
+      if (operations !== null) stats.users[userId].operations = operations;
+      count++;
+    }
+
+    saveStats(stats);
+
+    const embed = new EmbedBuilder()
+      .setTitle('All Member Stats Updated')
+      .setColor(0x57F287)
+      .setDescription(`Updated **${count}** members`)
+      .addFields(
+        { name: 'Points set to', value: points !== null ? `**${points}**` : 'Unchanged', inline: true },
+        { name: 'Dropships set to', value: operations !== null ? `**${operations}**` : 'Unchanged', inline: true }
+      );
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
@@ -612,7 +638,13 @@ client.on(Events.ClientReady, async () => {
     new SlashCommandBuilder()
       .setName('settotal')
       .setDescription('Set the server Total Dropships number')
-      .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true))
+      .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName('setall')
+      .setDescription('Set Points and Dropships for EVERYONE at once')
+      .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
+      .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false))
   ]);
   console.log('Slash commands registered');
 });
