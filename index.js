@@ -230,6 +230,63 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.reply({ embeds: [embed] });
   }
 
+  // ========== /servermembers ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'servermembers') {
+    const entries = Object.entries(stats.users);
+
+    if (entries.length === 0) {
+      return interaction.reply({ content: 'No members have any stats yet.', flags: MessageFlags.Ephemeral });
+    }
+
+    // Sort by points descending
+    entries.sort((a, b) => (b[1].points || 0) - (a[1].points || 0));
+
+    let description = '';
+    for (const [userId, data] of entries) {
+      description += `<@${userId}> — **${data.points || 0}** pts | **${data.operations || 0}** drops\n`;
+    }
+
+    // Discord embeds have a 4096 character limit
+    if (description.length > 4000) {
+      description = description.slice(0, 4000) + '\n...and more';
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('1st M.I. — Member Stats')
+      .setDescription(description)
+      .setColor(0x5865F2)
+      .setFooter({ text: `Total members with stats: ${entries.length}` });
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+
+  // ========== /setstats ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'setstats') {
+    const user = interaction.options.getUser('user');
+    const points = interaction.options.getInteger('points');
+    const operations = interaction.options.getInteger('operations');
+
+    if (!stats.users[user.id]) {
+      stats.users[user.id] = { points: 0, operations: 0, lastDrop: null };
+    }
+
+    if (points !== null) stats.users[user.id].points = points;
+    if (operations !== null) stats.users[user.id].operations = operations;
+
+    saveStats(stats);
+
+    const embed = new EmbedBuilder()
+      .setTitle('Stats Updated')
+      .setColor(0x57F287)
+      .setDescription(`Updated stats for **${user}**`)
+      .addFields(
+        { name: 'Points', value: `**${stats.users[user.id].points}**`, inline: true },
+        { name: 'Dropships', value: `**${stats.users[user.id].operations}**`, inline: true }
+      );
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+
   // ========== Game Mode ==========
   if (interaction.isButton() && interaction.customId.startsWith('mode_')) {
     const selected = GAME_MODES.find(m => m.id === interaction.customId);
@@ -522,7 +579,18 @@ client.on(Events.ClientReady, async () => {
 
     new SlashCommandBuilder()
       .setName('1stmidrops')
-      .setDescription('Show total dropships for the entire server')
+      .setDescription('Show total dropships for the entire server'),
+
+    new SlashCommandBuilder()
+      .setName('servermembers')
+      .setDescription('List all members who have points/dropships'),
+
+    new SlashCommandBuilder()
+      .setName('setstats')
+      .setDescription('Manually set a member\'s points and dropships')
+      .addUserOption(opt => opt.setName('user').setDescription('The member').setRequired(true))
+      .addIntegerOption(opt => opt.setName('points').setDescription('New points value').setRequired(false))
+      .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false))
   ]);
   console.log('Slash commands registered');
 });
