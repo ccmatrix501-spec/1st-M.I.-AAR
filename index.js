@@ -18,6 +18,7 @@ const {
   PermissionFlagsBits
 } = require('discord.js');
 const fs = require('fs');
+const http = require('http');
 
 const client = new Client({
   intents: [
@@ -87,6 +88,33 @@ const MAPS = [
   { id: 'map_sparta', label: 'Sparta' }
 ];
 
+// ========== LIVE STATS API ==========
+const server = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (req.url === '/stats') {
+    let totalPoints = 0;
+    for (const userId in stats.users) {
+      totalPoints += stats.users[userId].points || 0;
+    }
+
+    res.end(JSON.stringify({
+      totalDropships: stats.totalOperations || 0,
+      totalPoints: totalPoints
+    }));
+  } else {
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'Not found' }));
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Stats API running on port ${PORT}`);
+});
+
+// ========== DISCORD BOT ==========
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
@@ -235,7 +263,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
     data.map = MAPS.find(m => m.id === interaction.customId).label;
 
-    // Give choice: Voice Channel or Manual Select
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('method_voice').setLabel('Select Voice Channel').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('method_manual').setLabel('Select People Manually').setStyle(ButtonStyle.Secondary)
@@ -248,7 +275,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // ========== Method: Voice Channel ==========
+  // ========== Method: Voice ==========
   if (interaction.isButton() && interaction.customId === 'method_voice') {
     const data = pending.get(interaction.user.id);
     if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
@@ -265,7 +292,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  // ========== Method: Manual Select ==========
+  // ========== Method: Manual ==========
   if (interaction.isButton() && interaction.customId === 'method_manual') {
     const data = pending.get(interaction.user.id);
     if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
@@ -417,7 +444,6 @@ client.on(Events.InteractionCreate, async interaction => {
       .setFooter({ text: `Reported by ${interaction.user.tag}` })
       .setTimestamp();
 
-    // Server total embed
     let totalPoints = 0;
     for (const userId in stats.users) {
       totalPoints += stats.users[userId].points || 0;
