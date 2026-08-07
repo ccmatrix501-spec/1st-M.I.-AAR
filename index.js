@@ -34,7 +34,6 @@ const PANEL_CHANNEL_ID = '1533983126970433677';
 const REPORT_CHANNEL_ID = '1533983132464840765';
 // =================================
 
-// Also register commands on this server so you can run admin commands from it
 const EXTRA_GUILD_IDS = ['1352675653798989947'];
 
 const STATS_FILE = './data/stats.json';
@@ -82,7 +81,6 @@ const MAPS = [
   { id: 'map_sparta', label: 'Sparta' }
 ];
 
-// ========== LIVE STATS API + HEALTH CHECK ==========
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
@@ -158,7 +156,7 @@ client.on(Events.InteractionCreate, async interaction => {
   // ========== /drops ==========
   if (interaction.isChatInputCommand() && interaction.commandName === 'drops') {
     const user = interaction.options.getUser('user');
-    const userStats = stats.users[user.id] || { points: 0, operations: 0, lastDrop: null };
+    const userStats = stats.users[user.id] || { points: 0, operations: 0, lastDrop: null, drops: [] };
 
     const lastDropText = userStats.lastDrop
       ? `<t:${Math.floor(new Date(userStats.lastDrop).getTime() / 1000)}:F>`
@@ -169,14 +167,78 @@ client.on(Events.InteractionCreate, async interaction => {
       .setColor(0x5865F2)
       .setDescription(`**${user}**`)
       .addFields(
-        { name: 'Points', value: `**${userStats.points}**`, inline: true },
-        { name: 'Total Dropships', value: `**${userStats.operations}**`, inline: true },
+        { name: 'Points', value: `**${userStats.points || 0}**`, inline: true },
+        { name: 'Total Dropships', value: `**${userStats.operations || 0}**`, inline: true },
         { name: 'Last Dropship', value: lastDropText, inline: true }
       )
       .setThumbnail(user.displayAvatarURL())
-      .setFooter({ text: '1st M.I.' });
+      .setFooter({ text: '1st M.I. • Use /droplist for full history' });
 
     return interaction.reply({ embeds: [embed] });
+  }
+
+  // ========== /droplist ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'droplist') {
+    await interaction.deferReply();
+
+    const user = interaction.options.getUser('user');
+    const userStats = stats.users[user.id] || { points: 0, operations: 0, lastDrop: null, drops: [] };
+    const drops = Array.isArray(userStats.drops) ? userStats.drops : [];
+
+    if (drops.length === 0) {
+      return interaction.editReply({
+        content: `**${user}** has no detailed dropship history yet.\n(Only dropships made after the history feature was added will appear here.)\n\nTotal recorded dropships: **${userStats.operations || 0}**`
+      });
+    }
+
+    // Show newest first
+    const sorted = [...drops].reverse();
+    const pages = [];
+    let current = '';
+
+    sorted.forEach((drop, index) => {
+      const num = sorted.length - index;
+      const dateText = drop.date
+        ? `<t:${Math.floor(new Date(drop.date).getTime() / 1000)}:f>`
+        : 'Unknown date';
+
+      const line =
+        `**#${num}** — ${dateText}\n` +
+        `• Mode: **${drop.mode || 'N/A'}** | Map: **${drop.map || 'N/A'}**\n` +
+        `• Outcome: **${drop.outcome || 'N/A'}** | Extract: **${drop.extracted || 'N/A'}**\n` +
+        `• Points: **+${drop.points || 0}** | Mission: ${drop.mission || 'N/A'}\n\n`;
+
+      if ((current + line).length > 3800) {
+        pages.push(current);
+        current = line;
+      } else {
+        current += line;
+      }
+    });
+    if (current) pages.push(current);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Dropship History — ${user.username}`)
+      .setColor(0x5865F2)
+      .setDescription(pages[0])
+      .setThumbnail(user.displayAvatarURL())
+      .setFooter({
+        text: `Showing ${drops.length} recorded dropship(s) • Total ops: ${userStats.operations || 0} • Points: ${userStats.points || 0}`
+      });
+
+    await interaction.editReply({ embeds: [embed] });
+
+    // If more pages, send them as follow-ups
+    for (let i = 1; i < pages.length; i++) {
+      const pageEmbed = new EmbedBuilder()
+        .setTitle(`Dropship History — ${user.username} (continued)`)
+        .setColor(0x5865F2)
+        .setDescription(pages[i])
+        .setFooter({ text: `Page ${i + 1}/${pages.length}` });
+      await interaction.followUp({ embeds: [pageEmbed] });
+    }
+
+    return;
   }
 
   // ========== /1stmidrops ==========
@@ -243,7 +305,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const operations = interaction.options.getInteger('operations');
 
     if (!stats.users[user.id]) {
-      stats.users[user.id] = { points: 0, operations: 0, lastDrop: null };
+      stats.users[user.id] = { points: 0, operations: 0, lastDrop: null, drops: [] };
     }
 
     if (points !== null) stats.users[user.id].points = points;
@@ -293,7 +355,7 @@ client.on(Events.InteractionCreate, async interaction => {
         if (member.user.bot) return;
 
         if (!stats.users[member.id]) {
-          stats.users[member.id] = { points: 0, operations: 0, lastDrop: null };
+          stats.users[member.id] = { points: 0, operations: 0, lastDrop: null, drops: [] };
         }
 
         if (points !== null) stats.users[member.id].points = points;
@@ -344,6 +406,11 @@ client.on(Events.InteractionCreate, async interaction => {
         } else if (stats.users[userId].operations === 0) {
           stats.users[userId].lastDrop = null;
         }
+
+        // Remove the matching drop from history
+        if (Array.isArray(stats.users[userId].drops) && last.timestamp) {
+          stats.users[userId].drops = stats.users[userId].drops.filter(d => d.date !== last.timestamp);
+        }
       }
     });
 
@@ -369,7 +436,7 @@ client.on(Events.InteractionCreate, async interaction => {
     saveStats(stats);
 
     return interaction.editReply({
-      content: '✅ Last report has been undone.\n• Points and dropships reverted\n• Report messages deleted (if possible)'
+      content: '✅ Last report has been undone.\n• Points and dropships reverted\n• Last Dropship restored\n• Drop history entry removed\n• Report messages deleted (if possible)'
     });
   }
 
@@ -557,14 +624,29 @@ client.on(Events.InteractionCreate, async interaction => {
 
     data.users.forEach(userId => {
       if (!stats.users[userId]) {
-        stats.users[userId] = { points: 0, operations: 0, lastDrop: null };
+        stats.users[userId] = { points: 0, operations: 0, lastDrop: null, drops: [] };
       }
-      // Remember their previous lastDrop before we overwrite it
+      if (!Array.isArray(stats.users[userId].drops)) {
+        stats.users[userId].drops = [];
+      }
+
       previousLastDrops[userId] = stats.users[userId].lastDrop || null;
 
       stats.users[userId].points += pointsPerPerson;
       stats.users[userId].operations += 1;
       stats.users[userId].lastDrop = now;
+
+      // Add to detailed history
+      stats.users[userId].drops.push({
+        date: now,
+        mode: data.mode,
+        map: data.map,
+        mission: mission,
+        outcome: data.outcome,
+        extracted: data.extracted,
+        points: pointsPerPerson,
+        notes: notes
+      });
     });
 
     stats.lastReport = {
@@ -675,6 +757,11 @@ client.on(Events.ClientReady, async () => {
     new SlashCommandBuilder()
       .setName('drops')
       .setDescription('Check points and total dropships of a member')
+      .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName('droplist')
+      .setDescription('Show the full dropship history of a member')
       .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
 
     new SlashCommandBuilder()
