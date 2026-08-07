@@ -654,55 +654,62 @@ async function showModal(interaction, data) {
   await interaction.showModal(modal);
 }
 
-// Register commands on the main server
+// Register commands on MAIN server + TEST server so they appear in both
 client.on(Events.ClientReady, async () => {
-  try {
-    const guild = await client.guilds.fetch(TARGET_GUILD_ID);
+  const commandList = [
+    new SlashCommandBuilder()
+      .setName('setup')
+      .setDescription('Post the AAR panel in the questions channel'),
 
-    await guild.commands.set([
-      new SlashCommandBuilder()
-        .setName('setup')
-        .setDescription('Post the AAR panel in the questions channel'),
+    new SlashCommandBuilder()
+      .setName('drops')
+      .setDescription('Check points and total dropships of a member')
+      .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
 
-      new SlashCommandBuilder()
-        .setName('drops')
-        .setDescription('Check points and total dropships of a member')
-        .addUserOption(opt => opt.setName('user').setDescription('Member').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('1stmidrops')
+      .setDescription('Show total dropships for the entire server'),
 
-      new SlashCommandBuilder()
-        .setName('1stmidrops')
-        .setDescription('Show total dropships for the entire server'),
+    new SlashCommandBuilder()
+      .setName('servermembers')
+      .setDescription('List all members who have points/dropships'),
 
-      new SlashCommandBuilder()
-        .setName('servermembers')
-        .setDescription('List all members who have points/dropships'),
+    new SlashCommandBuilder()
+      .setName('setstats')
+      .setDescription("Manually set a member's points and dropships")
+      .addUserOption(opt => opt.setName('user').setDescription('The member').setRequired(true))
+      .addIntegerOption(opt => opt.setName('points').setDescription('New points value').setRequired(false))
+      .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false)),
 
-      new SlashCommandBuilder()
-        .setName('setstats')
-        .setDescription('Manually set a member\'s points and dropships')
-        .addUserOption(opt => opt.setName('user').setDescription('The member').setRequired(true))
-        .addIntegerOption(opt => opt.setName('points').setDescription('New points value').setRequired(false))
-        .addIntegerOption(opt => opt.setName('operations').setDescription('New dropships value').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('settotal')
+      .setDescription('Set the server Total Dropships number')
+      .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true)),
 
-      new SlashCommandBuilder()
-        .setName('settotal')
-        .setDescription('Set the server Total Dropships number')
-        .addIntegerOption(opt => opt.setName('total').setDescription('New total dropships').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('setall')
+      .setDescription('Set Points and Dropships for EVERYONE in the main server')
+      .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
+      .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false)),
 
-      new SlashCommandBuilder()
-        .setName('setall')
-        .setDescription('Set Points and Dropships for EVERYONE in the main server')
-        .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
-        .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('undolast')
+      .setDescription('Undo the last After Action Report (Admin only)')
+  ];
 
-      new SlashCommandBuilder()
-        .setName('undolast')
-        .setDescription('Undo the last After Action Report (Admin only)')
-    ]);
+  const guildIds = [
+    TARGET_GUILD_ID,          // Main server
+    '1352675653798989947'     // Test server
+  ];
 
-    console.log('Slash commands registered for the main server');
-  } catch (err) {
-    console.error('Failed to register commands:', err);
+  for (const guildId of guildIds) {
+    try {
+      const guild = await client.guilds.fetch(guildId);
+      await guild.commands.set(commandList);
+      console.log(`Slash commands registered for guild ${guildId}`);
+    } catch (err) {
+      console.error(`Failed to register commands for guild ${guildId}:`, err.message);
+    }
   }
 });
 
