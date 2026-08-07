@@ -316,6 +316,57 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
+  // ========== /undolast ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'undolast') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.editReply({ content: 'You need **Manage Server** permission to use this command.' });
+    }
+
+    if (!stats.lastReport) {
+      return interaction.editReply({ content: 'There is no last report to undo.' });
+    }
+
+    const last = stats.lastReport;
+
+    // Revert points and operations
+    last.users.forEach(userId => {
+      if (stats.users[userId]) {
+        stats.users[userId].points = Math.max(0, (stats.users[userId].points || 0) - last.pointsPerPerson);
+        stats.users[userId].operations = Math.max(0, (stats.users[userId].operations || 0) - 1);
+      }
+    });
+
+    if (typeof stats.totalOperations === 'number') {
+      stats.totalOperations = Math.max(0, stats.totalOperations - 1);
+    }
+
+    // Try to delete the report messages
+    try {
+      const ch = await client.channels.fetch(REPORT_CHANNEL_ID);
+      if (ch && last.messageIds && last.messageIds.length > 0) {
+        for (const msgId of last.messageIds) {
+          try {
+            const msg = await ch.messages.fetch(msgId);
+            await msg.delete();
+          } catch (e) {
+            // Message may already be deleted
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete report messages:', err);
+    }
+
+    delete stats.lastReport;
+    saveStats(stats);
+
+    return interaction.editReply({
+      content: '✅ Last report has been undone.\n• Points and dropships reverted\n• Report messages deleted (if possible)'
+    });
+  }
+
   // ========== Game Mode ==========
   if (interaction.isButton() && interaction.customId.startsWith('mode_')) {
     const selected = GAME_MODES.find(m => m.id === interaction.customId);
@@ -504,6 +555,15 @@ client.on(Events.InteractionCreate, async interaction => {
       stats.users[userId].operations += 1;
       stats.users[userId].lastDrop = now;
     });
+
+    // Save last report so it can be undone
+    stats.lastReport = {
+      users: [...data.users],
+      pointsPerPerson: pointsPerPerson,
+      messageIds: [],
+      timestamp: now
+    };
+
     saveStats(stats);
 
     const userMentions = data.users.map(id => `<@${id}>`).join(' ');
@@ -546,8 +606,11 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
       const ch = await client.channels.fetch(REPORT_CHANNEL_ID);
       if (ch) {
-        await ch.send({ embeds: [reportEmbed] });
-        await ch.send({ embeds: [totalEmbed] });
+        const reportMsg = await ch.send({ embeds: [reportEmbed] });
+        const totalMsg = await ch.send({ embeds: [totalEmbed] });
+
+        stats.lastReport.messageIds = [reportMsg.id, totalMsg.id];
+        saveStats(stats);
       }
     } catch (err) {
       console.error('Failed to send report:', err);
@@ -630,7 +693,11 @@ client.on(Events.ClientReady, async () => {
         .setName('setall')
         .setDescription('Set Points and Dropships for EVERYONE in the main server')
         .addIntegerOption(opt => opt.setName('points').setDescription('Points to set for everyone').setRequired(false))
-        .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false))
+        .addIntegerOption(opt => opt.setName('operations').setDescription('Dropships to set for everyone').setRequired(false)),
+
+      new SlashCommandBuilder()
+        .setName('undolast')
+        .setDescription('Undo the last After Action Report (Admin only)')
     ]);
 
     console.log('Slash commands registered for the main server');
