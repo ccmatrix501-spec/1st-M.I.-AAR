@@ -202,11 +202,16 @@ client.on(Events.InteractionCreate, async interaction => {
         ? `<t:${Math.floor(new Date(drop.date).getTime() / 1000)}:f>`
         : 'Unknown date';
 
+      const squadText = Array.isArray(drop.squad) && drop.squad.length > 0
+        ? drop.squad.map(id => `<@${id}>`).join(' ')
+        : 'Not recorded';
+
       const line =
         `**#${num}** — ${dateText}\n` +
         `• Mode: **${drop.mode || 'N/A'}** | Map: **${drop.map || 'N/A'}**\n` +
         `• Outcome: **${drop.outcome || 'N/A'}** | Extract: **${drop.extracted || 'N/A'}**\n` +
-        `• Points: **+${drop.points || 0}** | Mission: ${drop.mission || 'N/A'}\n\n`;
+        `• Points: **+${drop.points || 0}** | Mission: ${drop.mission || 'N/A'}\n` +
+        `• Squad: ${squadText}\n\n`;
 
       if ((current + line).length > 3800) {
         pages.push(current);
@@ -636,7 +641,7 @@ client.on(Events.InteractionCreate, async interaction => {
       stats.users[userId].operations += 1;
       stats.users[userId].lastDrop = now;
 
-      // Add to detailed history
+      // Add to detailed history (includes full squad)
       stats.users[userId].drops.push({
         date: now,
         mode: data.mode,
@@ -645,7 +650,8 @@ client.on(Events.InteractionCreate, async interaction => {
         outcome: data.outcome,
         extracted: data.extracted,
         points: pointsPerPerson,
-        notes: notes
+        notes: notes,
+        squad: [...data.users]
       });
     });
 
