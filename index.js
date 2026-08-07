@@ -337,6 +337,13 @@ client.on(Events.InteractionCreate, async interaction => {
       if (stats.users[userId]) {
         stats.users[userId].points = Math.max(0, (stats.users[userId].points || 0) - last.pointsPerPerson);
         stats.users[userId].operations = Math.max(0, (stats.users[userId].operations || 0) - 1);
+
+        // Restore previous Last Dropship date
+        if (last.previousLastDrops && Object.prototype.hasOwnProperty.call(last.previousLastDrops, userId)) {
+          stats.users[userId].lastDrop = last.previousLastDrops[userId];
+        } else if (stats.users[userId].operations === 0) {
+          stats.users[userId].lastDrop = null;
+        }
       }
     });
 
@@ -546,10 +553,15 @@ client.on(Events.InteractionCreate, async interaction => {
     if (typeof stats.totalOperations !== 'number') stats.totalOperations = 0;
     stats.totalOperations += 1;
 
+    const previousLastDrops = {};
+
     data.users.forEach(userId => {
       if (!stats.users[userId]) {
         stats.users[userId] = { points: 0, operations: 0, lastDrop: null };
       }
+      // Remember their previous lastDrop before we overwrite it
+      previousLastDrops[userId] = stats.users[userId].lastDrop || null;
+
       stats.users[userId].points += pointsPerPerson;
       stats.users[userId].operations += 1;
       stats.users[userId].lastDrop = now;
@@ -559,7 +571,8 @@ client.on(Events.InteractionCreate, async interaction => {
       users: [...data.users],
       pointsPerPerson: pointsPerPerson,
       messageIds: [],
-      timestamp: now
+      timestamp: now,
+      previousLastDrops: previousLastDrops
     };
 
     saveStats(stats);
