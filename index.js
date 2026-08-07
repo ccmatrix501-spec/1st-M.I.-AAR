@@ -34,6 +34,9 @@ const PANEL_CHANNEL_ID = '1533983126970433677';
 const REPORT_CHANNEL_ID = '1533983132464840765';
 // =================================
 
+// Also register commands on this server so you can run admin commands from it
+const EXTRA_GUILD_IDS = ['1352675653798989947'];
+
 const STATS_FILE = './data/stats.json';
 
 if (!fs.existsSync('./data')) {
@@ -325,12 +328,11 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (!stats.lastReport) {
-      return interaction.editReply({ content: 'There is no last report to undo.' });
+      return interaction.editReply({ content: 'There is no last report to undo.\n(Only works for reports made after this feature was added.)' });
     }
 
     const last = stats.lastReport;
 
-    // Revert points and operations
     last.users.forEach(userId => {
       if (stats.users[userId]) {
         stats.users[userId].points = Math.max(0, (stats.users[userId].points || 0) - last.pointsPerPerson);
@@ -342,7 +344,6 @@ client.on(Events.InteractionCreate, async interaction => {
       stats.totalOperations = Math.max(0, stats.totalOperations - 1);
     }
 
-    // Try to delete the report messages
     try {
       const ch = await client.channels.fetch(REPORT_CHANNEL_ID);
       if (ch && last.messageIds && last.messageIds.length > 0) {
@@ -350,9 +351,7 @@ client.on(Events.InteractionCreate, async interaction => {
           try {
             const msg = await ch.messages.fetch(msgId);
             await msg.delete();
-          } catch (e) {
-            // Message may already be deleted
-          }
+          } catch (e) {}
         }
       }
     } catch (err) {
@@ -538,7 +537,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const data = pending.get(interaction.user.id);
     if (!data) return interaction.reply({ content: 'Session expired.', flags: MessageFlags.Ephemeral });
 
-    const mission = interaction.fields.getTextInputValue('mission');
+    const mission = interaction.fields.getTextInputValue('mission') || 'N/A';
     const notes = interaction.fields.getTextInputValue('notes') || 'None';
 
     const pointsPerPerson = data.extracted === 'Yes' ? 3 : 1;
@@ -556,7 +555,6 @@ client.on(Events.InteractionCreate, async interaction => {
       stats.users[userId].lastDrop = now;
     });
 
-    // Save last report so it can be undone
     stats.lastReport = {
       users: [...data.users],
       pointsPerPerson: pointsPerPerson,
@@ -638,9 +636,9 @@ async function showModal(interaction, data) {
     new ActionRowBuilder().addComponents(
       new TextInputBuilder()
         .setCustomId('mission')
-        .setLabel('Mission / Operation Name')
+        .setLabel('Mission / Operation Name (optional)')
         .setStyle(TextInputStyle.Short)
-        .setRequired(true)
+        .setRequired(false)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder()
@@ -654,7 +652,7 @@ async function showModal(interaction, data) {
   await interaction.showModal(modal);
 }
 
-// Register commands on MAIN server + TEST server so they appear in both
+// Register commands on MAIN server + extra servers
 client.on(Events.ClientReady, async () => {
   const commandList = [
     new SlashCommandBuilder()
@@ -697,10 +695,7 @@ client.on(Events.ClientReady, async () => {
       .setDescription('Undo the last After Action Report (Admin only)')
   ];
 
-  const guildIds = [
-    TARGET_GUILD_ID,          // Main server
-    '1352675653798989947'     // Test server
-  ];
+  const guildIds = [TARGET_GUILD_ID, ...EXTRA_GUILD_IDS];
 
   for (const guildId of guildIds) {
     try {
