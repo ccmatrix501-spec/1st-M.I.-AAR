@@ -96,9 +96,22 @@ const server = http.createServer((req, res) => {
     for (const userId in stats.users) {
       totalPoints += stats.users[userId].points || 0;
     }
+
+    // Live Discord server member count
+    let totalMembers = 0;
+    try {
+      const guild = client.guilds.cache.get(TARGET_GUILD_ID);
+      if (guild) {
+        totalMembers = guild.memberCount || 0;
+      }
+    } catch (e) {
+      totalMembers = 0;
+    }
+
     res.end(JSON.stringify({
       totalDropships: stats.totalOperations || 0,
-      totalPoints: totalPoints
+      totalPoints: totalPoints,
+      totalMembers: totalMembers
     }));
   } else {
     res.statusCode = 404;
