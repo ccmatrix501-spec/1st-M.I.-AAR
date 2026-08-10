@@ -17,7 +17,17 @@ const {
   MessageFlags,
   PermissionFlagsBits
 } = require('discord.js');
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  entersState,
+  VoiceConnectionStatus,
+  getVoiceConnection
+} = require('@discordjs/voice');
 const fs = require('fs');
+const path = require('path');
 const http = require('http');
 
 const client = new Client({
@@ -35,6 +45,32 @@ const REPORT_CHANNEL_ID = '1533983132464840765';
 // =================================
 
 const EXTRA_GUILD_IDS = ['1352675653798989947'];
+
+// Flight Decks: watch for 12+ members → play audio here
+// Briefing Rooms: receive the text AAR reminder
+const FLIGHT_DECK_CHANNELS = {
+  '1355322836851626056': { // Flight Deck 1
+    name: 'Flight Deck 1',
+    textChannelId: '1296614834804097115' // Briefing Room 1
+  },
+  '1355322865981067284': { // Flight Deck 2
+    name: 'Flight Deck 2',
+    textChannelId: '1302158623966887946' // Briefing Room 2
+  },
+  '1457476382392188981': { // Flight Deck 3
+    name: 'Flight Deck 3',
+    textChannelId: '1457476407373594886' // Briefing Room 3
+  }
+};
+
+const WATCHED_VOICE_CHANNELS = Object.keys(FLIGHT_DECK_CHANNELS);
+
+const AAR_CHANNEL_LINK = `<#${PANEL_CHANNEL_ID}>`;
+const AUDIO_FILE = path.join(__dirname, 'aar-reminder.mp3');
+const MIN_MEMBERS_FOR_REMINDER = 12;
+
+// Track which channels have already triggered (reset when below 12)
+const reminderTriggered = new Map();
 
 const STATS_FILE = './data/stats.json';
 
@@ -81,6 +117,7 @@ const MAPS = [
   { id: 'map_sparta', label: 'Sparta' }
 ];
 
+// ========== LIVE STATS API + HEALTH CHECK ==========
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
@@ -101,9 +138,7 @@ const server = http.createServer((req, res) => {
     let totalMembers = 0;
     try {
       const guild = client.guilds.cache.get(TARGET_GUILD_ID);
-      if (guild) {
-        totalMembers = guild.memberCount || 0;
-      }
+      if (guild) totalMembers = guild.memberCount || 0;
     } catch (e) {
       totalMembers = 0;
     }
@@ -126,6 +161,125 @@ server.listen(PORT, () => {
 
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
+  if (!fs.existsSync(AUDIO_FILE)) {
+    console.warn(`WARNING: Audio file not found at ${AUDIO_FILE}`);
+    console.warn('Place aar-reminder.mp3 in the project root for voice reminders.');
+  } else {
+    console.log('AAR reminder audio file found.');
+  }
+});
+
+
+// Shared reminder: text in Briefing Room + audio on Flight Deck
+async function playAarReminder(channel, memberCount, label = null) {
+  const channelId = channel.id;
+  const deckInfo = FLIGHT_DECK_CHANNELS[channelId];
+  const displayName = label || deckInfo?.name || channel.name;
+
+  // 1) Text reminder in matching Briefing Room (or the channel itself)
+  try {
+    const textChannelId = deckInfo?.textChannelId;
+    const textChannel = textChannelId
+      ? await client.channels.fetch(textChannelId).catch(() => null)
+      : null;
+    const target = textChannel || channel;
+    await target.send({
+      content:
+        `📋 **AAR Reminder**` + (label ? ' *(TEST)*' : '') + `\n` +
+        `**${displayName}** has **${memberCount}** member(s).\n` +
+        `Platoon Lead — please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
+    });
+  } catch (err) {
+    console.error('Failed to send text reminder:', err.message);
+  }
+
+  // 2) Join Flight Deck and play audio
+  if (!fs.existsSync(AUDIO_FILE)) {
+    console.warn('Skipping audio — aar-reminder.mp3 not found');
+    return { textSent: true, audioPlayed: false };
+  }
+
+  try {
+    // Destroy any existing connection in this guild first
+    const existing = getVoiceConnection(channel.guild.id);
+    if (existing) {
+      try { existing.destroy(); } catch (e) {}
+    }
+
+    const connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: false
+    });
+
+    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+
+    const player = createAudioPlayer();
+    const resource = createAudioResource(AUDIO_FILE);
+    connection.subscribe(player);
+    player.play(resource);
+
+    player.on(AudioPlayerStatus.Idle, () => {
+      try { connection.destroy(); } catch (e) {}
+    });
+
+    player.on('error', (err) => {
+      console.error('Audio player error:', err.message);
+      try { connection.destroy(); } catch (e) {}
+    });
+
+    setTimeout(() => {
+      try {
+        const conn = getVoiceConnection(channel.guild.id);
+        if (conn) conn.destroy();
+      } catch (e) {}
+    }, 60_000);
+
+    return { textSent: true, audioPlayed: true };
+  } catch (err) {
+    console.error('Failed to join/play audio:', err.message);
+    return { textSent: true, audioPlayed: false, error: err.message };
+  }
+}
+
+// ========== VOICE CHANNEL WATCHER ==========
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  try {
+    // Check both old and new channel in case of leave/move/join
+    const channelsToCheck = new Set();
+    if (oldState.channelId && WATCHED_VOICE_CHANNELS.includes(oldState.channelId)) {
+      channelsToCheck.add(oldState.channelId);
+    }
+    if (newState.channelId && WATCHED_VOICE_CHANNELS.includes(newState.channelId)) {
+      channelsToCheck.add(newState.channelId);
+    }
+
+    for (const channelId of channelsToCheck) {
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!channel || channel.type !== ChannelType.GuildVoice) continue;
+
+      const memberCount = channel.members.filter(m => !m.user.bot).size;
+
+      // Reset trigger when below threshold
+      if (memberCount < MIN_MEMBERS_FOR_REMINDER) {
+        reminderTriggered.set(channelId, false);
+        continue;
+      }
+
+      // Already triggered for this session
+      if (reminderTriggered.get(channelId)) continue;
+
+      // Hit 12+ — trigger once
+      reminderTriggered.set(channelId, true);
+      const deckInfo = FLIGHT_DECK_CHANNELS[channelId];
+      console.log(`${deckInfo?.name || channel.name} hit ${memberCount} members — sending AAR reminder`);
+      await playAarReminder(channel, memberCount);
+    }
+  } catch (err) {
+    console.error('VoiceStateUpdate handler error:', err);
+  }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -204,7 +358,6 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // Show newest first
     const sorted = [...drops].reverse();
     const pages = [];
     let current = '';
@@ -246,7 +399,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.editReply({ embeds: [embed] });
 
-    // If more pages, send them as follow-ups
     for (let i = 1; i < pages.length; i++) {
       const pageEmbed = new EmbedBuilder()
         .setTitle(`Dropship History — ${user.username} (continued)`)
@@ -418,14 +570,12 @@ client.on(Events.InteractionCreate, async interaction => {
         stats.users[userId].points = Math.max(0, (stats.users[userId].points || 0) - last.pointsPerPerson);
         stats.users[userId].operations = Math.max(0, (stats.users[userId].operations || 0) - 1);
 
-        // Restore previous Last Dropship date
         if (last.previousLastDrops && Object.prototype.hasOwnProperty.call(last.previousLastDrops, userId)) {
           stats.users[userId].lastDrop = last.previousLastDrops[userId];
         } else if (stats.users[userId].operations === 0) {
           stats.users[userId].lastDrop = null;
         }
 
-        // Remove the matching drop from history
         if (Array.isArray(stats.users[userId].drops) && last.timestamp) {
           stats.users[userId].drops = stats.users[userId].drops.filter(d => d.date !== last.timestamp);
         }
@@ -455,6 +605,55 @@ client.on(Events.InteractionCreate, async interaction => {
 
     return interaction.editReply({
       content: '✅ Last report has been undone.\n• Points and dropships reverted\n• Last Dropship restored\n• Drop history entry removed\n• Report messages deleted (if possible)'
+    });
+  }
+
+
+  // ========== /testreminder ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'testreminder') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      return interaction.editReply({ content: 'You need **Manage Server** permission to use this command.' });
+    }
+
+    // Prefer explicit channel option, else the VC the user is in
+    let channel = interaction.options.getChannel('channel');
+
+    if (!channel) {
+      const member = interaction.member;
+      if (member.voice && member.voice.channel) {
+        channel = member.voice.channel;
+      }
+    }
+
+    if (!channel || channel.type !== ChannelType.GuildVoice) {
+      return interaction.editReply({
+        content: 'Join a **Flight Deck** voice channel first, or pass one with the `channel` option.\n' +
+          'Example: `/testreminder channel:#Flight-Deck-1`'
+      });
+    }
+
+    if (!WATCHED_VOICE_CHANNELS.includes(channel.id)) {
+      return interaction.editReply({
+        content: `**${channel.name}** is not a watched Flight Deck.\n` +
+          `Use Flight Deck 1, 2, or 3.`
+      });
+    }
+
+    const memberCount = channel.members.filter(m => !m.user.bot).size;
+    if (memberCount < 1) {
+      return interaction.editReply({ content: 'There is no one in that voice channel to test with.' });
+    }
+
+    const result = await playAarReminder(channel, memberCount, `${channel.name} (TEST)`);
+
+    return interaction.editReply({
+      content:
+        `✅ **Test reminder fired for ${channel.name}**\n` +
+        `• Members in channel: **${memberCount}**\n` +
+        `• Text reminder: ${result.textSent ? 'sent to matching Briefing Room' : 'failed'}\n` +
+        `• Audio: ${result.audioPlayed ? 'playing now' : (result.error ? `failed — ${result.error}` : 'skipped (no aar-reminder.mp3)')}`
     });
   }
 
@@ -654,7 +853,6 @@ client.on(Events.InteractionCreate, async interaction => {
       stats.users[userId].operations += 1;
       stats.users[userId].lastDrop = now;
 
-      // Add to detailed history (includes full squad)
       stats.users[userId].drops.push({
         date: now,
         mode: data.mode,
@@ -811,7 +1009,17 @@ client.on(Events.ClientReady, async () => {
 
     new SlashCommandBuilder()
       .setName('undolast')
-      .setDescription('Undo the last After Action Report (Admin only)')
+      .setDescription('Undo the last After Action Report (Admin only)'),
+
+    new SlashCommandBuilder()
+      .setName('testreminder')
+      .setDescription('TEST: fire AAR reminder on a Flight Deck (1+ users, Admin only)')
+      .addChannelOption(opt =>
+        opt.setName('channel')
+          .setDescription('Flight Deck to test (or join one and omit this)')
+          .addChannelTypes(ChannelType.GuildVoice)
+          .setRequired(false)
+      )
   ];
 
   const guildIds = [TARGET_GUILD_ID, ...EXTRA_GUILD_IDS];
