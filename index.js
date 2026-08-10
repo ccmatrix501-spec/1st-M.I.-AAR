@@ -613,10 +613,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isChatInputCommand() && interaction.commandName === 'testreminder') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-      return interaction.editReply({ content: 'You need **Manage Server** permission to use this command.' });
-    }
-
     // Prefer explicit channel option, else the VC the user is in
     let channel = interaction.options.getChannel('channel');
 
