@@ -29,6 +29,18 @@ const {
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const { generateDependencyReport } = require('@discordjs/voice');
+
+// Use bundled ffmpeg for audio playback
+try {
+  const ffmpegPath = require('ffmpeg-static');
+  if (ffmpegPath) {
+    process.env.FFMPEG_PATH = ffmpegPath;
+    console.log('ffmpeg path set:', ffmpegPath);
+  }
+} catch (e) {
+  console.warn('ffmpeg-static not available:', e.message);
+}
 
 const client = new Client({
   intents: [
@@ -161,6 +173,9 @@ server.listen(PORT, () => {
 
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
+  try {
+    console.log(generateDependencyReport());
+  } catch (e) {}
   if (!fs.existsSync(AUDIO_FILE)) {
     console.warn(`WARNING: Audio file not found at ${AUDIO_FILE}`);
     console.warn('Place aar-reminder.mp3 in the project root for voice reminders.');
@@ -206,6 +221,18 @@ async function playAarReminder(channel, memberCount, label = null) {
       try { existing.destroy(); } catch (e) {}
     }
 
+    const me = channel.guild.members.me;
+    if (me) {
+      const perms = channel.permissionsFor(me);
+      if (perms && (!perms.has('Connect') || !perms.has('Speak'))) {
+        return {
+          textSent: true,
+          audioPlayed: false,
+          error: 'Bot needs Connect + Speak permission in this voice channel'
+        };
+      }
+    }
+
     const connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
@@ -214,10 +241,18 @@ async function playAarReminder(channel, memberCount, label = null) {
       selfMute: false
     });
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+    connection.on('error', (err) => {
+      console.error('Voice connection error:', err.message);
+    });
+
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
 
     const player = createAudioPlayer();
-    const resource = createAudioResource(AUDIO_FILE);
+    const resource = createAudioResource(AUDIO_FILE, {
+      inlineVolume: true
+    });
+    if (resource.volume) resource.volume.setVolume(1.0);
+
     connection.subscribe(player);
     player.play(resource);
 
@@ -239,8 +274,9 @@ async function playAarReminder(channel, memberCount, label = null) {
 
     return { textSent: true, audioPlayed: true };
   } catch (err) {
-    console.error('Failed to join/play audio:', err.message);
-    return { textSent: true, audioPlayed: false, error: err.message };
+    console.error('Failed to join/play audio:', err);
+    const msg = err.message || String(err);
+    return { textSent: true, audioPlayed: false, error: msg };
   }
 }
 
