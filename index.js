@@ -1,4 +1,10 @@
 require('dotenv').config();
+
+// Prefer IPv4 — helps Discord voice on some Railway regions
+try {
+  const dns = require('dns');
+  dns.setDefaultResultOrder('ipv4first');
+} catch (e) {}
 const {
   Client,
   GatewayIntentBits,
@@ -24,13 +30,28 @@ const {
   AudioPlayerStatus,
   entersState,
   VoiceConnectionStatus,
-  getVoiceConnection
+  getVoiceConnection,
+  generateDependencyReport
 } = require('@discordjs/voice');
+
+// Load DAVE (required for Discord voice E2EE in 2026+)
+try {
+  require('@snazzah/davey');
+  console.log('DAVE protocol library (@snazzah/davey) loaded');
+} catch (e) {
+  console.warn('DAVE library failed to load:', e.message);
+}
+
+// Prefer native opus
+try {
+  require('@discordjs/opus');
+  console.log('Native @discordjs/opus loaded');
+} catch (e) {
+  console.warn('@discordjs/opus failed:', e.message);
+}
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { generateDependencyReport } = require('@discordjs/voice');
-
 // Use bundled ffmpeg for audio playback
 try {
   const ffmpegPath = require('ffmpeg-static');
@@ -40,6 +61,17 @@ try {
   }
 } catch (e) {
   console.warn('ffmpeg-static not available:', e.message);
+}
+
+// libsodium must be ready before any voice connection
+let sodiumReady = Promise.resolve();
+try {
+  const sodium = require('libsodium-wrappers');
+  sodiumReady = sodium.ready.then(() => {
+    console.log('libsodium ready for voice encryption');
+  });
+} catch (e) {
+  console.warn('libsodium-wrappers not available:', e.message);
 }
 
 const client = new Client({
@@ -200,7 +232,7 @@ async function playAarReminder(channel, memberCount, label = null) {
     const target = textChannel || channel;
     await target.send({
       content:
-        `📋 **AAR Reminder**` + (label ? ' *(TEST)*' : '') + `\n` +
+        `📋 **AAR Reminder` + (label ? ' (TEST)' : '') + `**\n` +
         `**${displayName}** has **${memberCount}** member(s).\n` +
         `Platoon Lead — please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
     });
@@ -214,8 +246,24 @@ async function playAarReminder(channel, memberCount, label = null) {
     return { textSent: true, audioPlayed: false };
   }
 
+  let connection = null;
+  let left = false;
+  const forceLeave = () => {
+    if (left) return;
+    left = true;
+    try {
+      if (connection) connection.destroy();
+    } catch (e) {}
+    try {
+      const conn = getVoiceConnection(channel.guild.id);
+      if (conn) conn.destroy();
+    } catch (e) {}
+    console.log(`Left voice channel ${channel.name}`);
+  };
+
   try {
-    // Destroy any existing connection in this guild first
+    await sodiumReady;
+
     const existing = getVoiceConnection(channel.guild.id);
     if (existing) {
       try { existing.destroy(); } catch (e) {}
@@ -233,50 +281,83 @@ async function playAarReminder(channel, memberCount, label = null) {
       }
     }
 
-    const connection = joinVoiceChannel({
+    console.log(`Joining voice channel ${channel.name} (${channel.id})...`);
+
+    connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
       adapterCreator: channel.guild.voiceAdapterCreator,
       selfDeaf: false,
-      selfMute: false
+      selfMute: false,
+      debug: true
+    });
+
+    connection.on('debug', (m) => console.log('[VOICE DEBUG]', m));
+
+    connection.on('stateChange', (oldState, newState) => {
+      console.log(`Voice state: ${oldState.status} -> ${newState.status}`);
     });
 
     connection.on('error', (err) => {
       console.error('Voice connection error:', err.message);
     });
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    // Always leave within 45s no matter what
+    const hardLeaveTimer = setTimeout(() => forceLeave(), 45_000);
+
+    // Wait for Ready (or give up after 20s and still try to play)
+    let ready = false;
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      ready = true;
+      console.log('Voice connection Ready');
+    } catch (e) {
+      console.warn('Ready wait timed out, current status:', connection.state?.status);
+      // If Discord already shows us connected, keep going and try to play
+      if (connection.state?.status === VoiceConnectionStatus.Ready) {
+        ready = true;
+      }
+    }
+
+    if (!ready && connection.state?.status !== VoiceConnectionStatus.Ready) {
+      clearTimeout(hardLeaveTimer);
+      forceLeave();
+      return {
+        textSent: true,
+        audioPlayed: false,
+        error: `Voice never became Ready (status=${connection.state?.status}). Bot left the channel.`
+      };
+    }
 
     const player = createAudioPlayer();
-    const resource = createAudioResource(AUDIO_FILE, {
-      inlineVolume: true
-    });
+    const resource = createAudioResource(AUDIO_FILE, { inlineVolume: true });
     if (resource.volume) resource.volume.setVolume(1.0);
 
     connection.subscribe(player);
     player.play(resource);
+    console.log('Audio playback started');
 
-    player.on(AudioPlayerStatus.Idle, () => {
-      try { connection.destroy(); } catch (e) {}
+    await new Promise((resolve) => {
+      const done = () => {
+        player.removeAllListeners();
+        resolve();
+      };
+      player.once(AudioPlayerStatus.Idle, done);
+      player.once('error', (err) => {
+        console.error('Audio player error:', err.message);
+        done();
+      });
+      // Max play time 30s
+      setTimeout(done, 30_000);
     });
 
-    player.on('error', (err) => {
-      console.error('Audio player error:', err.message);
-      try { connection.destroy(); } catch (e) {}
-    });
-
-    setTimeout(() => {
-      try {
-        const conn = getVoiceConnection(channel.guild.id);
-        if (conn) conn.destroy();
-      } catch (e) {}
-    }, 60_000);
-
+    clearTimeout(hardLeaveTimer);
+    forceLeave();
     return { textSent: true, audioPlayed: true };
   } catch (err) {
     console.error('Failed to join/play audio:', err);
-    const msg = err.message || String(err);
-    return { textSent: true, audioPlayed: false, error: msg };
+    forceLeave();
+    return { textSent: true, audioPlayed: false, error: err.message || String(err) };
   }
 }
 
