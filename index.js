@@ -42,12 +42,12 @@ try {
   console.warn('DAVE library failed to load:', e.message);
 }
 
-// Prefer native opus
+// Pure-JS Opus (no native build required on Railway)
 try {
-  require('@discordjs/opus');
-  console.log('Native @discordjs/opus loaded');
+  require('opusscript');
+  console.log('opusscript loaded');
 } catch (e) {
-  console.warn('@discordjs/opus failed:', e.message);
+  console.warn('opusscript failed:', e.message);
 }
 const fs = require('fs');
 const path = require('path');
