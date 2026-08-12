@@ -90,28 +90,21 @@ const REPORT_CHANNEL_ID = '1533983132464840765';
 
 const EXTRA_GUILD_IDS = ['1352675653798989947'];
 
-// Flight Decks: watch for 12+ members → play audio here
-// Briefing Rooms: receive the text AAR reminder
-const FLIGHT_DECK_CHANNELS = {
-  '1355322836851626056': { // Flight Deck 1
-    name: 'Flight Deck 1',
-    textChannelId: '1296614834804097115' // Briefing Room 1
-  },
-  '1355322865981067284': { // Flight Deck 2
-    name: 'Flight Deck 2',
-    textChannelId: '1302158623966887946' // Briefing Room 2
-  },
-  '1457476382392188981': { // Flight Deck 3
-    name: 'Flight Deck 3',
-    textChannelId: '1457476407373594886' // Briefing Room 3
-  }
+// Platoon Lead channels: text reminder when 1+ user joins (tags them)
+const WATCH_CHANNELS = {
+  '1296616703827902474': { name: 'Platoon Lead 1' },
+  '1296616682525032448': { name: 'Platoon Lead 2' },
+  '1457476430819492024': { name: 'Platoon Lead 3' }
 };
 
-const WATCHED_VOICE_CHANNELS = Object.keys(FLIGHT_DECK_CHANNELS);
+const WATCHED_VOICE_CHANNELS = Object.keys(WATCH_CHANNELS);
+
+// Alias so older function code still works
+const BRIEFING_ROOM_CHANNELS = WATCH_CHANNELS;
 
 const AAR_CHANNEL_LINK = `<#${PANEL_CHANNEL_ID}>`;
 const AUDIO_FILE = path.join(__dirname, 'aar-reminder.mp3');
-const MIN_MEMBERS_FOR_REMINDER = 12;
+const MIN_MEMBERS_FOR_REMINDER = 1;
 
 // Track which channels have already triggered (reset when below 12)
 const reminderTriggered = new Map();
@@ -217,30 +210,30 @@ client.once(Events.ClientReady, () => {
 });
 
 
-// Shared reminder: text in Briefing Room + audio on Flight Deck
+// Shared reminder: text + audio in Briefing Room
 async function playAarReminder(channel, memberCount, label = null) {
   const channelId = channel.id;
-  const deckInfo = FLIGHT_DECK_CHANNELS[channelId];
-  const displayName = label || deckInfo?.name || channel.name;
+  const roomInfo = BRIEFING_ROOM_CHANNELS[channelId];
+  const displayName = label || roomInfo?.name || channel.name;
 
-  // 1) Text reminder in matching Briefing Room (or the channel itself)
+  // Members in the voice channel (for ping)
+  const humanMembers = [...channel.members.values()].filter(m => !m.user.bot);
+  const pings = humanMembers.map(m => `<@${m.id}>`).join(' ') || '@here';
+
+  // 1) Text reminder in the Briefing Room chat + ping people in the VC
   try {
-    const textChannelId = deckInfo?.textChannelId;
-    const textChannel = textChannelId
-      ? await client.channels.fetch(textChannelId).catch(() => null)
-      : null;
-    const target = textChannel || channel;
-    await target.send({
+    await channel.send({
       content:
         `📋 **AAR Reminder` + (label ? ' (TEST)' : '') + `**\n` +
-        `**${displayName}** has **${memberCount}** member(s).\n` +
-        `Platoon Lead — please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
+        `${pings}\n` +
+        `You are in **${displayName}**.\n` +
+        `Please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
     });
   } catch (err) {
     console.error('Failed to send text reminder:', err.message);
   }
 
-  // 2) Join Flight Deck and play audio
+  // 2) Join the Briefing Room and play audio
   if (!fs.existsSync(AUDIO_FILE)) {
     console.warn('Skipping audio — aar-reminder.mp3 not found');
     return { textSent: true, audioPlayed: false };
@@ -302,10 +295,8 @@ async function playAarReminder(channel, memberCount, label = null) {
       console.error('Voice connection error:', err.message);
     });
 
-    // Always leave within 45s no matter what
     const hardLeaveTimer = setTimeout(() => forceLeave(), 45_000);
 
-    // Wait for Ready (or give up after 20s and still try to play)
     let ready = false;
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
@@ -313,7 +304,6 @@ async function playAarReminder(channel, memberCount, label = null) {
       console.log('Voice connection Ready');
     } catch (e) {
       console.warn('Ready wait timed out, current status:', connection.state?.status);
-      // If Discord already shows us connected, keep going and try to play
       if (connection.state?.status === VoiceConnectionStatus.Ready) {
         ready = true;
       }
@@ -347,7 +337,6 @@ async function playAarReminder(channel, memberCount, label = null) {
         console.error('Audio player error:', err.message);
         done();
       });
-      // Max play time 30s
       setTimeout(done, 30_000);
     });
 
@@ -390,7 +379,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
       // Hit 12+ — trigger once
       reminderTriggered.set(channelId, true);
-      const deckInfo = FLIGHT_DECK_CHANNELS[channelId];
+      const deckInfo = BRIEFING_ROOM_CHANNELS[channelId];
       console.log(`${deckInfo?.name || channel.name} hit ${memberCount} members — sending AAR reminder`);
       await playAarReminder(channel, memberCount);
     }
@@ -742,15 +731,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (!channel || channel.type !== ChannelType.GuildVoice) {
       return interaction.editReply({
-        content: 'Join a **Flight Deck** voice channel first, or pass one with the `channel` option.\n' +
-          'Example: `/testreminder channel:#Flight-Deck-1`'
+        content: 'Join a **Platoon Lead** voice channel first, or pass one with the `channel` option.\n' +
+          'Example: `/testreminder channel:#Platoon-Lead-1`'
       });
     }
 
     if (!WATCHED_VOICE_CHANNELS.includes(channel.id)) {
       return interaction.editReply({
-        content: `**${channel.name}** is not a watched Flight Deck.\n` +
-          `Use Flight Deck 1, 2, or 3.`
+        content: `**${channel.name}** is not a watched Platoon Lead channel.\n` +
+          `Use Platoon Lead 1, 2, or 3.`
       });
     }
 
@@ -765,7 +754,7 @@ client.on(Events.InteractionCreate, async interaction => {
       content:
         `✅ **Test reminder fired for ${channel.name}**\n` +
         `• Members in channel: **${memberCount}**\n` +
-        `• Text reminder: ${result.textSent ? 'sent to matching Briefing Room' : 'failed'}\n` +
+        `• Text reminder: ${result.textSent ? 'sent in channel' : 'failed'}\n` +
         `• Audio: ${result.audioPlayed ? 'playing now' : (result.error ? `failed — ${result.error}` : 'skipped (no aar-reminder.mp3)')}`
     });
   }
@@ -1126,10 +1115,10 @@ client.on(Events.ClientReady, async () => {
 
     new SlashCommandBuilder()
       .setName('testreminder')
-      .setDescription('TEST: fire AAR reminder on a Flight Deck (1+ users, Admin only)')
+      .setDescription('TEST: fire AAR reminder on a Briefing Room (1+ users, Admin only)')
       .addChannelOption(opt =>
         opt.setName('channel')
-          .setDescription('Flight Deck to test (or join one and omit this)')
+          .setDescription('Platoon Lead channel to test (or join one and omit this)')
           .addChannelTypes(ChannelType.GuildVoice)
           .setRequired(false)
       )
