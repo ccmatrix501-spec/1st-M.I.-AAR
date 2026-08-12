@@ -13,6 +13,8 @@ const {
   ButtonBuilder,
   ButtonStyle,
   UserSelectMenuBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder,
   ChannelType,
   ModalBuilder,
@@ -968,15 +970,44 @@ client.on(Events.InteractionCreate, async interaction => {
       });
 
       const squadNames = ['Demon', 'Nightmare', 'Cerberus', 'Hellfire'];
-      const rows = squadNames.map(name => {
+      const rows = [];
+
+      for (const name of squadNames) {
         const optional = name === 'Cerberus';
-        const select = new UserSelectMenuBuilder()
+        const inChannel = snapshot.squads[name] || [];
+        const select = new StringSelectMenuBuilder()
           .setCustomId(`pl_squadlead_${num}_${name}`)
-          .setPlaceholder(optional ? `Select ${name} Squad Lead (optional)` : `Select ${name} Squad Lead`)
+          .setPlaceholder(
+            inChannel.length === 0
+              ? `${name}: nobody in VC`
+              : (optional ? `Select ${name} Squad Lead (optional)` : `Select ${name} Squad Lead`)
+          )
           .setMinValues(0)
           .setMaxValues(1);
-        return new ActionRowBuilder().addComponents(select);
-      });
+
+        if (inChannel.length === 0) {
+          select.addOptions(
+            new StringSelectMenuOptionBuilder()
+              .setLabel('Nobody in this channel')
+              .setValue('none')
+              .setDescription(`No one is in ${name} right now`)
+          );
+          select.setDisabled(true);
+        } else {
+          // Only people currently in THIS squad's voice channel
+          for (const userId of inChannel.slice(0, 25)) {
+            const member = await interaction.guild.members.fetch(userId).catch(() => null);
+            const label = member ? (member.displayName || member.user.username) : userId;
+            select.addOptions(
+              new StringSelectMenuOptionBuilder()
+                .setLabel(label.slice(0, 100))
+                .setValue(userId)
+                .setDescription(`In ${name}`)
+            );
+          }
+        }
+        rows.push(new ActionRowBuilder().addComponents(select));
+      }
 
       rows.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -985,15 +1016,17 @@ client.on(Events.InteractionCreate, async interaction => {
           .setStyle(ButtonStyle.Success)
       ));
 
+      const rosterPreview = formatSnapshotLines(snapshot);
+
       return interaction.editReply({
         content:
           `✅ You are PL for **${snapshot.dropshipName}**.\n` +
-          `VC snapshot taken.\n\n` +
-          `Select Squad Leads:\n` +
-          `• **Demon** — required\n` +
-          `• **Nightmare** — required\n` +
+          `VC snapshot:\n${rosterPreview}\n\n` +
+          `Select Squad Leads from **people in that squad's channel only**:\n` +
+          `• **Demon** — required (if someone is in Demon)\n` +
+          `• **Nightmare** — required (if someone is in Nightmare)\n` +
           `• **Cerberus** — optional\n` +
-          `• **Hellfire** — required\n\n` +
+          `• **Hellfire** — required (if someone is in Hellfire)\n\n` +
           `Then click **Save PL Snapshot**.`,
         components: rows
       });
@@ -1004,7 +1037,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ========== PL Squad Lead select ==========
-  if (interaction.isUserSelectMenu() && interaction.customId.startsWith('pl_squadlead_')) {
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('pl_squadlead_')) {
     const parts = interaction.customId.split('_');
     // pl_squadlead_{num}_{SquadName}
     const num = Number(parts[2]);
@@ -1019,7 +1052,18 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    const selected = interaction.values[0] || null;
+    let selected = interaction.values[0] || null;
+    if (selected === 'none') selected = null;
+
+    // Safety: only allow IDs that were in that squad channel at snapshot time
+    const allowed = setup.snapshot.squads[squadName] || [];
+    if (selected && !allowed.includes(selected)) {
+      return interaction.reply({
+        content: `That user was not in **${squadName}** when the snapshot was taken.`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
     setup.squadLeads[squadName] = selected;
     pending.set(key, setup);
 
@@ -1045,13 +1089,16 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ content: 'PL setup session expired. Click the PL button again.' });
     }
 
-    const requiredLeads = ['Demon', 'Nightmare', 'Hellfire'];
+    // Required only if that squad VC had at least one person
+    const requiredLeads = ['Demon', 'Nightmare', 'Hellfire'].filter(
+      n => (setup.snapshot.squads[n] || []).length > 0
+    );
     const missing = requiredLeads.filter(n => !setup.squadLeads[n]);
     if (missing.length) {
       return interaction.editReply({
         content:
           `Please select Squad Leads for: **${missing.join(', ')}**\n` +
-          `(Cerberus is optional.)`
+          `(Only people in that channel are listed. Cerberus is optional.)`
       });
     }
 
