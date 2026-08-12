@@ -106,7 +106,7 @@ const DROPSHIPS = {
   },
   2: {
     name: 'Dropship 2',
-    flightDeckId: '1302158623966887946',
+    flightDeckId: '1355322865981067284',
     channels: {
       'Platoon Lead': '1296616682525032448',
       'Demon': '1296619115888246814',
