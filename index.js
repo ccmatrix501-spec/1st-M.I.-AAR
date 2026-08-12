@@ -88,7 +88,112 @@ const PANEL_CHANNEL_ID = '1533983126970433677';
 const REPORT_CHANNEL_ID = '1533983132464840765';
 // =================================
 
+
 const EXTRA_GUILD_IDS = ['1352675653798989947'];
+
+// ========== DROPSHIP CATEGORIES (PL snapshot) ==========
+const DROPSHIPS = {
+  1: {
+    name: 'Dropship 1',
+    flightDeckId: '1355322836851626056',
+    channels: {
+      'Platoon Lead': '1296616703827902474',
+      'Demon': '1296619397095362570',
+      'Nightmare': '1296619817004175401',
+      'Cerberus': '1296619836935245876',
+      'Hellfire': '1296619861828698264'
+    }
+  },
+  2: {
+    name: 'Dropship 2',
+    flightDeckId: '1302158623966887946',
+    channels: {
+      'Platoon Lead': '1296616682525032448',
+      'Demon': '1296619115888246814',
+      'Nightmare': '1296620348934062122',
+      'Cerberus': '1296620554052178082',
+      'Hellfire': '1296620786525802568'
+    }
+  },
+  3: {
+    name: 'Dropship 3',
+    flightDeckId: '1457476382392188981',
+    channels: {
+      'Platoon Lead': '1457476430819492024',
+      'Demon': '1457476467179917393',
+      'Nightmare': '1457476507432648766',
+      'Cerberus': '1457476552756433151',
+      'Hellfire': '1457476572465463566'
+    }
+  }
+};
+
+const SNAPSHOTS_FILE = './data/pl-snapshots.json';
+
+function loadSnapshots() {
+  if (!fs.existsSync(SNAPSHOTS_FILE)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(SNAPSHOTS_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveSnapshots(data) {
+  fs.writeFileSync(SNAPSHOTS_FILE, JSON.stringify(data, null, 2));
+}
+
+async function takeDropshipSnapshot(guild, dropshipNumber, plUserId) {
+  const ds = DROPSHIPS[dropshipNumber];
+  if (!ds) throw new Error('Invalid dropship');
+
+  const squads = {};
+  const allMemberIds = new Set();
+
+  for (const [squadName, channelId] of Object.entries(ds.channels)) {
+    const ch = await guild.channels.fetch(channelId).catch(() => null);
+    const members = [];
+    if (ch && ch.type === ChannelType.GuildVoice) {
+      for (const [id, member] of ch.members) {
+        if (!member.user.bot) {
+          members.push(id);
+          allMemberIds.add(id);
+        }
+      }
+    }
+    squads[squadName] = members;
+  }
+
+  // Ensure PL is recorded
+  allMemberIds.add(plUserId);
+
+  return {
+    dropship: dropshipNumber,
+    dropshipName: ds.name,
+    plUserId,
+    squads,
+    allMemberIds: [...allMemberIds],
+    takenAt: new Date().toISOString()
+  };
+}
+
+function formatSnapshotLines(snapshot) {
+  const lines = [];
+  lines.push(`**Platoon Lead:** <@${snapshot.plUserId}>`);
+  for (const [name, ids] of Object.entries(snapshot.squads || {})) {
+    const mentions = ids.length ? ids.map(id => `<@${id}>`).join(' ') : '—';
+    const leadId = snapshot.squadLeads && snapshot.squadLeads[name];
+    const leadBit = leadId ? ` (Lead: <@${leadId}>)` : '';
+    // Don't show lead bit on Platoon Lead channel line
+    if (name === 'Platoon Lead') {
+      lines.push(`**${name}:** ${mentions}`);
+    } else {
+      lines.push(`**${name}:** ${mentions}${leadBit}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 
 // Platoon Lead channels: TEXT reminder when 1+ user joins (tags them)
 const PLATOON_LEAD_CHANNELS = {
@@ -787,6 +892,194 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
+
+  // ========== /plpanel ==========
+  if (interaction.isChatInputCommand() && interaction.commandName === 'plpanel') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const results = [];
+    for (const [num, ds] of Object.entries(DROPSHIPS)) {
+      try {
+        const ch = await client.channels.fetch(ds.flightDeckId);
+        if (!ch) {
+          results.push(`Dropship ${num}: channel not found`);
+          continue;
+        }
+        const embed = new EmbedBuilder()
+          .setTitle(`${ds.name} — Platoon Lead`)
+          .setDescription(
+            'If you are the **Platoon Lead** for this dropship, click the button below.\n' +
+            'This saves a snapshot of who is in:\n' +
+            '• Platoon Lead\n• Demon\n• Nightmare\n• Cerberus\n• Hellfire\n\n' +
+            'That roster will auto-load when you submit the AAR.'
+          )
+          .setColor(0x5865F2);
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`pl_claim_${num}`)
+            .setLabel(`Yes — I'm PL for ${ds.name}`)
+            .setStyle(ButtonStyle.Success)
+        );
+
+        await ch.send({ embeds: [embed], components: [row] });
+        results.push(`Dropship ${num}: panel posted in <#${ds.flightDeckId}>`);
+      } catch (err) {
+        results.push(`Dropship ${num}: ${err.message}`);
+      }
+    }
+    return interaction.editReply({ content: results.join('\n') });
+  }
+
+  // ========== PL Claim button ==========
+  if (interaction.isButton() && interaction.customId.startsWith('pl_claim_')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const num = Number(interaction.customId.replace('pl_claim_', ''));
+    if (!DROPSHIPS[num]) {
+      return interaction.editReply({ content: 'Invalid dropship.' });
+    }
+
+    try {
+      // Take VC snapshot first, then ask for squad leads
+      const snapshot = await takeDropshipSnapshot(interaction.guild, num, interaction.user.id);
+      pending.set(`plsetup_${interaction.user.id}`, {
+        type: 'pl_setup',
+        dropship: num,
+        snapshot,
+        squadLeads: {},
+        channelId: interaction.channelId
+      });
+
+      const squadNames = ['Demon', 'Nightmare', 'Cerberus', 'Hellfire'];
+      const rows = squadNames.map(name => {
+        const optional = name === 'Cerberus';
+        const select = new UserSelectMenuBuilder()
+          .setCustomId(`pl_squadlead_${num}_${name}`)
+          .setPlaceholder(optional ? `Select ${name} Squad Lead (optional)` : `Select ${name} Squad Lead`)
+          .setMinValues(0)
+          .setMaxValues(1);
+        return new ActionRowBuilder().addComponents(select);
+      });
+
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`pl_finish_${num}`)
+          .setLabel('Save PL Snapshot')
+          .setStyle(ButtonStyle.Success)
+      ));
+
+      return interaction.editReply({
+        content:
+          `✅ You are PL for **${snapshot.dropshipName}**.\n` +
+          `VC snapshot taken.\n\n` +
+          `Select Squad Leads:\n` +
+          `• **Demon** — required\n` +
+          `• **Nightmare** — required\n` +
+          `• **Cerberus** — optional\n` +
+          `• **Hellfire** — required\n\n` +
+          `Then click **Save PL Snapshot**.`,
+        components: rows
+      });
+    } catch (err) {
+      console.error('PL claim failed:', err);
+      return interaction.editReply({ content: `Failed to snapshot: ${err.message}` });
+    }
+  }
+
+  // ========== PL Squad Lead select ==========
+  if (interaction.isUserSelectMenu() && interaction.customId.startsWith('pl_squadlead_')) {
+    const parts = interaction.customId.split('_');
+    // pl_squadlead_{num}_{SquadName}
+    const num = Number(parts[2]);
+    const squadName = parts.slice(3).join('_'); // Demon / Nightmare / etc.
+
+    const key = `plsetup_${interaction.user.id}`;
+    const setup = pending.get(key);
+    if (!setup || setup.dropship !== num) {
+      return interaction.reply({
+        content: 'PL setup session expired. Click the PL button again.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    const selected = interaction.values[0] || null;
+    setup.squadLeads[squadName] = selected;
+    pending.set(key, setup);
+
+    const leadsSummary = ['Demon', 'Nightmare', 'Cerberus', 'Hellfire']
+      .map(n => `**${n}:** ${setup.squadLeads[n] ? `<@${setup.squadLeads[n]}>` : '_not set_'}`)
+      .join('\n');
+
+    await interaction.reply({
+      content: `Updated **${squadName}** Squad Lead.\n\nCurrent leads:\n${leadsSummary}\n\nClick **Save PL Snapshot** when done.`,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  // ========== PL Finish / Save ==========
+  if (interaction.isButton() && interaction.customId.startsWith('pl_finish_')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const num = Number(interaction.customId.replace('pl_finish_', ''));
+    const key = `plsetup_${interaction.user.id}`;
+    const setup = pending.get(key);
+
+    if (!setup || setup.dropship !== num) {
+      return interaction.editReply({ content: 'PL setup session expired. Click the PL button again.' });
+    }
+
+    const requiredLeads = ['Demon', 'Nightmare', 'Hellfire'];
+    const missing = requiredLeads.filter(n => !setup.squadLeads[n]);
+    if (missing.length) {
+      return interaction.editReply({
+        content:
+          `Please select Squad Leads for: **${missing.join(', ')}**\n` +
+          `(Cerberus is optional.)`
+      });
+    }
+
+    const snapshot = setup.snapshot;
+    snapshot.squadLeads = { ...setup.squadLeads };
+    snapshot.plUserId = interaction.user.id;
+
+    // Ensure squad leads are in allMemberIds
+    for (const id of Object.values(snapshot.squadLeads)) {
+      if (id) snapshot.allMemberIds.push(id);
+    }
+    snapshot.allMemberIds = [...new Set(snapshot.allMemberIds)];
+
+    const snapshots = loadSnapshots();
+    snapshots[interaction.user.id] = snapshot;
+    saveSnapshots(snapshots);
+    pending.delete(key);
+
+    const leadLines = ['Demon', 'Nightmare', 'Cerberus', 'Hellfire']
+      .map(n => `**${n} Lead:** ${snapshot.squadLeads[n] ? `<@${snapshot.squadLeads[n]}>` : '—'}`)
+      .join('\n');
+
+    const publicContent =
+      `📋 **${snapshot.dropshipName} — PL set**\n` +
+      formatSnapshotLines(snapshot) +
+      `\n${leadLines}` +
+      `\n_Snapshot saved for <@${interaction.user.id}> — will auto-load on their next AAR._`;
+
+    try {
+      const ch = setup.channelId
+        ? await client.channels.fetch(setup.channelId).catch(() => interaction.channel)
+        : interaction.channel;
+      if (ch) await ch.send({ content: publicContent });
+    } catch (err) {
+      console.error('Failed to post PL public log:', err.message);
+    }
+
+    return interaction.editReply({
+      content:
+        `✅ Saved as PL for **${snapshot.dropshipName}**.\n` +
+        formatSnapshotLines(snapshot) +
+        `\n${leadLines}` +
+        `\n\nWhen you file the AAR, this roster will be selected automatically.`
+    });
+  }
+
   // ========== Game Mode ==========
   if (interaction.isButton() && interaction.customId.startsWith('mode_')) {
     const selected = GAME_MODES.find(m => m.id === interaction.customId);
@@ -820,13 +1113,42 @@ client.on(Events.InteractionCreate, async interaction => {
 
     data.map = MAPS.find(m => m.id === interaction.customId).label;
 
+    // Auto-load most recent PL snapshot for this user
+    const snapshots = loadSnapshots();
+    const snap = snapshots[interaction.user.id];
+    if (snap && Array.isArray(snap.allMemberIds) && snap.allMemberIds.length > 0) {
+      data.users = [...snap.allMemberIds];
+      data.snapshot = snap;
+      data.plUserId = snap.plUserId;
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('outcome_success').setLabel('Success').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('outcome_partial').setLabel('Partial').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('outcome_failure').setLabel('Failure').setStyle(ButtonStyle.Danger)
+      );
+      const changeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('method_voice').setLabel('Change: Voice Channel').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('method_manual').setLabel('Change: Select Manually').setStyle(ButtonStyle.Secondary)
+      );
+
+      await interaction.update({
+        content:
+          `**${data.mode} → ${data.map}**\n` +
+          `✅ Using your latest PL snapshot (**${snap.dropshipName}**)\n` +
+          `${formatSnapshotLines(snap)}\n\n` +
+          `Choose Outcome (or change squad):`,
+        components: [row, changeRow]
+      });
+      return;
+    }
+
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('method_voice').setLabel('Select Voice Channel').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('method_manual').setLabel('Select People Manually').setStyle(ButtonStyle.Secondary)
     );
 
     await interaction.update({
-      content: `**${data.mode} → ${data.map}**\nHow do you want to select the squad?`,
+      content: `**${data.mode} → ${data.map}**\nHow do you want to select the squad?\n_(No PL snapshot found — claim PL on a Flight Deck first)_`,
       components: [row]
     });
     return;
@@ -1022,7 +1344,10 @@ client.on(Events.InteractionCreate, async interaction => {
         { name: 'Outcome', value: data.outcome, inline: true },
         { name: 'Full Extract?', value: data.extracted, inline: true },
         { name: 'Points Awarded', value: pointsText, inline: true },
-        { name: 'Squad', value: userMentions },
+        { name: 'Squad', value: userMentions || '—' },
+        ...(data.snapshot ? [
+          { name: 'Dropship / PL Roster', value: formatSnapshotLines(data.snapshot).slice(0, 1024) }
+        ] : []),
         { name: 'Notes / Debrief', value: notes }
       )
       .setFooter({ text: `Reported by ${interaction.user.tag}` })
@@ -1143,13 +1468,17 @@ client.on(Events.ClientReady, async () => {
 
     new SlashCommandBuilder()
       .setName('testreminder')
-      .setDescription('TEST: fire AAR reminder on a Briefing Room (1+ users, Admin only)')
+      .setDescription('TEST: fire AAR reminder on a watched voice channel')
       .addChannelOption(opt =>
         opt.setName('channel')
-          .setDescription('Platoon Lead channel to test (or join one and omit this)')
+          .setDescription('Channel to test (or join one and omit this)')
           .addChannelTypes(ChannelType.GuildVoice)
           .setRequired(false)
-      )
+      ),
+
+    new SlashCommandBuilder()
+      .setName('plpanel')
+      .setDescription('Post Platoon Lead claim buttons in all Flight Deck chats')
   ];
 
   const guildIds = [TARGET_GUILD_ID, ...EXTRA_GUILD_IDS];

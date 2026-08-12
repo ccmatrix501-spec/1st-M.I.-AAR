@@ -1,17 +1,14 @@
-Place your reminder audio file in this folder as:
+AAR BOT — reminders + PL snapshots
 
-  aar-reminder.mp3
+AUDIO FILE:
+  Place aar-reminder.mp3 next to index.js
 
 REMINDERS:
+  Platoon Lead 1/2/3  -> text at 1+ users (tags them)
+  Briefing Room 1/2/3 -> text + audio at 12+ users
 
-1) Platoon Lead 1 / 2 / 3
-   - Trigger: 1+ user
-   - Text reminder in that channel (tags the user)
-   - No audio by default
-
-2) Briefing Room 1 / 2 / 3
-   - Trigger: 12+ users
-   - Text reminder in that channel
-   - Audio plays in that Briefing Room
-
-Test with: /testreminder (forces text + audio)
+PL SNAPSHOTS:
+  /plpanel  -> posts "I'm PL" buttons in Flight Deck 1/2/3 chats
+  Clicking saves roster from: Platoon Lead, Demon, Nightmare, Cerberus, Hellfire
+  Snapshot is stored on the PL's user id
+  When that PL runs an AAR, the latest snapshot auto-fills the squad
