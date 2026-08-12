@@ -147,31 +147,45 @@ async function takeDropshipSnapshot(guild, dropshipNumber, plUserId) {
   const ds = DROPSHIPS[dropshipNumber];
   if (!ds) throw new Error('Invalid dropship');
 
+  // Each squad ONLY lists people currently in THAT voice channel
   const squads = {};
   const allMemberIds = new Set();
 
   for (const [squadName, channelId] of Object.entries(ds.channels)) {
-    const ch = await guild.channels.fetch(channelId).catch(() => null);
     const members = [];
-    if (ch && ch.type === ChannelType.GuildVoice) {
-      for (const [id, member] of ch.members) {
-        if (!member.user.bot) {
-          members.push(id);
-          allMemberIds.add(id);
+    try {
+      const ch = await guild.channels.fetch(channelId);
+      if (ch && ch.isVoiceBased && ch.isVoiceBased()) {
+        // Fresh member list from this channel only
+        for (const member of ch.members.values()) {
+          if (member.user && !member.user.bot) {
+            members.push(member.id);
+            allMemberIds.add(member.id);
+          }
+        }
+      } else if (ch && ch.type === ChannelType.GuildVoice) {
+        for (const member of ch.members.values()) {
+          if (member.user && !member.user.bot) {
+            members.push(member.id);
+            allMemberIds.add(member.id);
+          }
         }
       }
+    } catch (e) {
+      console.warn(`Snapshot: could not read ${squadName} (${channelId}):`, e.message);
     }
-    squads[squadName] = members;
+    // Store ONLY this channel's occupants — never copy from other squads
+    squads[squadName] = [...new Set(members)];
   }
 
-  // Ensure PL is recorded
+  // PL id is metadata; do not invent them into a squad list unless they are in that VC
   allMemberIds.add(plUserId);
 
   return {
     dropship: dropshipNumber,
     dropshipName: ds.name,
     plUserId,
-    squads,
+    squads, // { 'Platoon Lead': [...], Demon: [...], ... } each from its own channel
     allMemberIds: [...allMemberIds],
     takenAt: new Date().toISOString()
   };
@@ -179,15 +193,19 @@ async function takeDropshipSnapshot(guild, dropshipNumber, plUserId) {
 
 function formatSnapshotLines(snapshot) {
   const lines = [];
-  lines.push(`**Platoon Lead:** <@${snapshot.plUserId}>`);
-  for (const [name, ids] of Object.entries(snapshot.squads || {})) {
+  // Who claimed PL (button clicker)
+  lines.push(`**Platoon Lead (claimed by):** <@${snapshot.plUserId}>`);
+
+  // Fixed order — each line is ONLY people who were in that channel
+  const order = ['Platoon Lead', 'Demon', 'Nightmare', 'Cerberus', 'Hellfire'];
+  for (const name of order) {
+    const ids = (snapshot.squads && snapshot.squads[name]) ? snapshot.squads[name] : [];
     const mentions = ids.length ? ids.map(id => `<@${id}>`).join(' ') : '—';
-    const leadId = snapshot.squadLeads && snapshot.squadLeads[name];
-    const leadBit = leadId ? ` (Lead: <@${leadId}>)` : '';
-    // Don't show lead bit on Platoon Lead channel line
     if (name === 'Platoon Lead') {
-      lines.push(`**${name}:** ${mentions}`);
+      lines.push(`**In Platoon Lead VC:** ${mentions}`);
     } else {
+      const leadId = snapshot.squadLeads && snapshot.squadLeads[name];
+      const leadBit = leadId ? ` | Lead: <@${leadId}>` : '';
       lines.push(`**${name}:** ${mentions}${leadBit}`);
     }
   }
@@ -1041,11 +1059,16 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot.squadLeads = { ...setup.squadLeads };
     snapshot.plUserId = interaction.user.id;
 
-    // Ensure squad leads are in allMemberIds
-    for (const id of Object.values(snapshot.squadLeads)) {
+    // Squad leads are labels only — add to allMemberIds for points if set,
+    // but do NOT inject them into other squad VC lists
+    for (const id of Object.values(snapshot.squadLeads || {})) {
       if (id) snapshot.allMemberIds.push(id);
     }
     snapshot.allMemberIds = [...new Set(snapshot.allMemberIds)];
+    // Re-assert each squad list is unique to itself
+    for (const name of Object.keys(snapshot.squads || {})) {
+      snapshot.squads[name] = [...new Set(snapshot.squads[name] || [])];
+    }
 
     const snapshots = loadSnapshots();
     snapshots[interaction.user.id] = snapshot;
@@ -1344,7 +1367,7 @@ client.on(Events.InteractionCreate, async interaction => {
         { name: 'Outcome', value: data.outcome, inline: true },
         { name: 'Full Extract?', value: data.extracted, inline: true },
         { name: 'Points Awarded', value: pointsText, inline: true },
-        { name: 'Squad', value: userMentions || '—' },
+        { name: 'Squad', value: data.snapshot ? '_See Dropship / PL Roster below_' : (userMentions || '—') },
         ...(data.snapshot ? [
           { name: 'Dropship / PL Roster', value: formatSnapshotLines(data.snapshot).slice(0, 1024) }
         ] : []),
