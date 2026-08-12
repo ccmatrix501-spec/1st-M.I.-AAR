@@ -2,14 +2,16 @@ Place your reminder audio file in this folder as:
 
   aar-reminder.mp3
 
-When someone joins a Platoon Lead voice channel (1+ users):
-  - Text AAR reminder is posted in that channel chat
-  - The user(s) in the channel are tagged
-  - Bot may also try to play aar-reminder.mp3
+REMINDERS:
 
-Watched channels:
-  Platoon Lead 1  (1296616703827902474)
-  Platoon Lead 2  (1296616682525032448)
-  Platoon Lead 3  (1457476430819492024)
+1) Platoon Lead 1 / 2 / 3
+   - Trigger: 1+ user
+   - Text reminder in that channel (tags the user)
+   - No audio by default
 
-Test with: /testreminder (while in a Platoon Lead channel)
+2) Briefing Room 1 / 2 / 3
+   - Trigger: 12+ users
+   - Text reminder in that channel
+   - Audio plays in that Briefing Room
+
+Test with: /testreminder (forces text + audio)

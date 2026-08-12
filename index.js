@@ -90,21 +90,25 @@ const REPORT_CHANNEL_ID = '1533983132464840765';
 
 const EXTRA_GUILD_IDS = ['1352675653798989947'];
 
-// Platoon Lead channels: text reminder when 1+ user joins (tags them)
-const WATCH_CHANNELS = {
-  '1296616703827902474': { name: 'Platoon Lead 1' },
-  '1296616682525032448': { name: 'Platoon Lead 2' },
-  '1457476430819492024': { name: 'Platoon Lead 3' }
+// Platoon Lead channels: TEXT reminder when 1+ user joins (tags them)
+const PLATOON_LEAD_CHANNELS = {
+  '1296616703827902474': { name: 'Platoon Lead 1', minMembers: 1, text: true, audio: false },
+  '1296616682525032448': { name: 'Platoon Lead 2', minMembers: 1, text: true, audio: false },
+  '1457476430819492024': { name: 'Platoon Lead 3', minMembers: 1, text: true, audio: false }
 };
 
-const WATCHED_VOICE_CHANNELS = Object.keys(WATCH_CHANNELS);
+// Briefing Rooms: AUDIO (+ text) when 12+ users
+const BRIEFING_ROOM_CHANNELS = {
+  '1296614834804097115': { name: 'Briefing Room 1', minMembers: 12, text: true, audio: true },
+  '1302158623966887946': { name: 'Briefing Room 2', minMembers: 12, text: true, audio: true },
+  '1457476407373594886': { name: 'Briefing Room 3', minMembers: 12, text: true, audio: true }
+};
 
-// Alias so older function code still works
-const BRIEFING_ROOM_CHANNELS = WATCH_CHANNELS;
+const ALL_WATCH_CHANNELS = { ...PLATOON_LEAD_CHANNELS, ...BRIEFING_ROOM_CHANNELS };
+const WATCHED_VOICE_CHANNELS = Object.keys(ALL_WATCH_CHANNELS);
 
 const AAR_CHANNEL_LINK = `<#${PANEL_CHANNEL_ID}>`;
 const AUDIO_FILE = path.join(__dirname, 'aar-reminder.mp3');
-const MIN_MEMBERS_FOR_REMINDER = 1;
 
 // Track which channels have already triggered (reset when below 12)
 const reminderTriggered = new Map();
@@ -211,32 +215,46 @@ client.once(Events.ClientReady, () => {
 
 
 // Shared reminder: text + audio in Briefing Room
-async function playAarReminder(channel, memberCount, label = null) {
+async function playAarReminder(channel, memberCount, label = null, options = {}) {
   const channelId = channel.id;
-  const roomInfo = BRIEFING_ROOM_CHANNELS[channelId];
+  const roomInfo = ALL_WATCH_CHANNELS[channelId] || BRIEFING_ROOM_CHANNELS[channelId] || PLATOON_LEAD_CHANNELS[channelId];
   const displayName = label || roomInfo?.name || channel.name;
+  const doText = options.doText !== false;
+  const doAudio = options.doAudio === true || (options.doAudio !== false && roomInfo?.audio === true);
+  // Default: text always unless explicitly disabled; audio only if requested/configured
+  const shouldText = options.doText !== undefined ? options.doText : true;
+  const shouldAudio = options.doAudio !== undefined ? options.doAudio : (roomInfo?.audio === true);
 
   // Members in the voice channel (for ping)
   const humanMembers = [...channel.members.values()].filter(m => !m.user.bot);
   const pings = humanMembers.map(m => `<@${m.id}>`).join(' ') || '@here';
 
-  // 1) Text reminder in the Briefing Room chat + ping people in the VC
-  try {
-    await channel.send({
-      content:
-        `📋 **AAR Reminder` + (label ? ' (TEST)' : '') + `**\n` +
-        `${pings}\n` +
-        `You are in **${displayName}**.\n` +
-        `Please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
-    });
-  } catch (err) {
-    console.error('Failed to send text reminder:', err.message);
+  let textSent = false;
+
+  // 1) Text reminder + ping people in the VC
+  if (shouldText) {
+    try {
+      await channel.send({
+        content:
+          `📋 **AAR Reminder` + (label ? ' (TEST)' : '') + `**\n` +
+          `${pings}\n` +
+          `You are in **${displayName}**.\n` +
+          `Please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
+      });
+      textSent = true;
+    } catch (err) {
+      console.error('Failed to send text reminder:', err.message);
+    }
   }
 
-  // 2) Join the Briefing Room and play audio
+  // 2) Join and play audio (Briefing Rooms at 12+)
+  if (!shouldAudio) {
+    return { textSent, audioPlayed: false };
+  }
+
   if (!fs.existsSync(AUDIO_FILE)) {
     console.warn('Skipping audio — aar-reminder.mp3 not found');
-    return { textSent: true, audioPlayed: false };
+    return { textSent, audioPlayed: false };
   }
 
   let connection = null;
@@ -366,10 +384,14 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       const channel = await client.channels.fetch(channelId).catch(() => null);
       if (!channel || channel.type !== ChannelType.GuildVoice) continue;
 
+      const info = ALL_WATCH_CHANNELS[channelId];
+      if (!info) continue;
+
       const memberCount = channel.members.filter(m => !m.user.bot).size;
+      const minMembers = info.minMembers || 1;
 
       // Reset trigger when below threshold
-      if (memberCount < MIN_MEMBERS_FOR_REMINDER) {
+      if (memberCount < minMembers) {
         reminderTriggered.set(channelId, false);
         continue;
       }
@@ -377,11 +399,13 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       // Already triggered for this session
       if (reminderTriggered.get(channelId)) continue;
 
-      // Hit 12+ — trigger once
+      // Threshold hit — trigger once
       reminderTriggered.set(channelId, true);
-      const deckInfo = BRIEFING_ROOM_CHANNELS[channelId];
-      console.log(`${deckInfo?.name || channel.name} hit ${memberCount} members — sending AAR reminder`);
-      await playAarReminder(channel, memberCount);
+      console.log(`${info.name || channel.name} hit ${memberCount} members — sending AAR reminder`);
+      await playAarReminder(channel, memberCount, null, {
+        doText: info.text !== false,
+        doAudio: info.audio === true
+      });
     }
   } catch (err) {
     console.error('VoiceStateUpdate handler error:', err);
@@ -738,8 +762,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (!WATCHED_VOICE_CHANNELS.includes(channel.id)) {
       return interaction.editReply({
-        content: `**${channel.name}** is not a watched Platoon Lead channel.\n` +
-          `Use Platoon Lead 1, 2, or 3.`
+        content: `**${channel.name}** is not a watched channel.\n` +
+          `Use Platoon Lead 1–3 or Briefing Room 1–3.`
       });
     }
 
@@ -748,7 +772,11 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ content: 'There is no one in that voice channel to test with.' });
     }
 
-    const result = await playAarReminder(channel, memberCount, `${channel.name} (TEST)`);
+    const info = ALL_WATCH_CHANNELS[channel.id] || {};
+    const result = await playAarReminder(channel, memberCount, `${channel.name} (TEST)`, {
+      doText: true,
+      doAudio: true  // force audio on test so you can verify
+    });
 
     return interaction.editReply({
       content:
