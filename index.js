@@ -90,18 +90,21 @@ const REPORT_CHANNEL_ID = '1533983132464840765';
 
 const EXTRA_GUILD_IDS = ['1352675653798989947'];
 
-// Briefing Rooms: watch for 12+ members → text + audio in the same room
-const BRIEFING_ROOM_CHANNELS = {
-  '1296614834804097115': { name: 'Briefing Room 1' },
-  '1302158623966887946': { name: 'Briefing Room 2' },
-  '1457476407373594886': { name: 'Briefing Room 3' }
+// Platoon Lead channels: text reminder when 1+ user joins (tags them)
+const WATCH_CHANNELS = {
+  '1296616703827902474': { name: 'Platoon Lead 1' },
+  '1296616682525032448': { name: 'Platoon Lead 2' },
+  '1457476430819492024': { name: 'Platoon Lead 3' }
 };
 
-const WATCHED_VOICE_CHANNELS = Object.keys(BRIEFING_ROOM_CHANNELS);
+const WATCHED_VOICE_CHANNELS = Object.keys(WATCH_CHANNELS);
+
+// Alias so older function code still works
+const BRIEFING_ROOM_CHANNELS = WATCH_CHANNELS;
 
 const AAR_CHANNEL_LINK = `<#${PANEL_CHANNEL_ID}>`;
 const AUDIO_FILE = path.join(__dirname, 'aar-reminder.mp3');
-const MIN_MEMBERS_FOR_REMINDER = 12;
+const MIN_MEMBERS_FOR_REMINDER = 1;
 
 // Track which channels have already triggered (reset when below 12)
 const reminderTriggered = new Map();
@@ -223,8 +226,8 @@ async function playAarReminder(channel, memberCount, label = null) {
       content:
         `📋 **AAR Reminder` + (label ? ' (TEST)' : '') + `**\n` +
         `${pings}\n` +
-        `**${displayName}** has **${memberCount}** member(s).\n` +
-        `Platoon Lead — please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
+        `You are in **${displayName}**.\n` +
+        `Please submit the After Action Report here: ${AAR_CHANNEL_LINK}`
     });
   } catch (err) {
     console.error('Failed to send text reminder:', err.message);
@@ -728,15 +731,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (!channel || channel.type !== ChannelType.GuildVoice) {
       return interaction.editReply({
-        content: 'Join a **Briefing Room** voice channel first, or pass one with the `channel` option.\n' +
-          'Example: `/testreminder channel:#Briefing-Room-1`'
+        content: 'Join a **Platoon Lead** voice channel first, or pass one with the `channel` option.\n' +
+          'Example: `/testreminder channel:#Platoon-Lead-1`'
       });
     }
 
     if (!WATCHED_VOICE_CHANNELS.includes(channel.id)) {
       return interaction.editReply({
-        content: `**${channel.name}** is not a watched Briefing Room.\n` +
-          `Use Briefing Room 1, 2, or 3.`
+        content: `**${channel.name}** is not a watched Platoon Lead channel.\n` +
+          `Use Platoon Lead 1, 2, or 3.`
       });
     }
 
@@ -751,7 +754,7 @@ client.on(Events.InteractionCreate, async interaction => {
       content:
         `✅ **Test reminder fired for ${channel.name}**\n` +
         `• Members in channel: **${memberCount}**\n` +
-        `• Text reminder: ${result.textSent ? 'sent in Briefing Room' : 'failed'}\n` +
+        `• Text reminder: ${result.textSent ? 'sent in channel' : 'failed'}\n` +
         `• Audio: ${result.audioPlayed ? 'playing now' : (result.error ? `failed — ${result.error}` : 'skipped (no aar-reminder.mp3)')}`
     });
   }
@@ -1115,7 +1118,7 @@ client.on(Events.ClientReady, async () => {
       .setDescription('TEST: fire AAR reminder on a Briefing Room (1+ users, Admin only)')
       .addChannelOption(opt =>
         opt.setName('channel')
-          .setDescription('Briefing Room to test (or join one and omit this)')
+          .setDescription('Platoon Lead channel to test (or join one and omit this)')
           .addChannelTypes(ChannelType.GuildVoice)
           .setRequired(false)
       )
