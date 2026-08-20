@@ -1,179 +1,65 @@
-# 1st Mobile Infantry Onboarding Bot — Discord Components V2
+# 1st M.I. Combined Bot
 
-This build replaces the old PNG-card/fake-button presentation with **native Discord Components V2**.
+One Discord bot for:
 
-## What changed
-
-- The onboarding interface is now rendered by Discord itself using a native Components V2 **Container**.
-- The 1st M.I. logo appears as the native section thumbnail.
-- Questions and descriptions are native Discord text, so they scale properly on desktop and mobile.
-- Every visible choice is a real Discord button.
-- The public Step 1 panel stays available for new members.
-- After a member selects a path, the rest of their onboarding is private/ephemeral.
-- Step 1 → Step 2 → branching Step 3 behaviour is preserved.
-- The Recruit role is selected when `/onboarding-panel` is posted and is awarded when onboarding is complete.
-- The final screen says **STATUS: RECRUIT** and contains no Start Over button.
-
-## Flow
-
-### Step 1 — What are you here for?
-
-- Starship Troopers
-- Hell Let Loose: Vietnam
-- Ambassador
-- Returning Member
-
-The selected path role can be assigned automatically through `config.json`.
-
-### Step 2 — Region
-
-- America
-- Europe
-- Asia
-- Africa
-- Oceania
-
-### Step 3
-
-**Starship Troopers / Hell Let Loose: Vietnam**
-
-- PC
-- Xbox
-- PlayStation
-
-**Ambassador / Returning Member**
-
-- Rules & Conduct
-- I Agree / I Do Not Agree
-
-### Step 4+
-
-**Starship Troopers / Hell Let Loose: Vietnam**
-
-- Experience selection
-- Completion → Recruit role
-
-**Ambassador**
-
-- Community / Unit Name modal
-- Completion → Recruit role
-
-**Returning Member**
-
-- Previous 1st M.I. name modal
-- Previous rank / role
-- Completion → Recruit role
-
-## Post the onboarding panel
-
-Run:
-
-```text
-/onboarding-panel recruit-role:@Recruit
-```
-
-The bot verifies that it can assign the selected Recruit role before posting the panel.
-
-## Custom game emblems on buttons
-
-Discord native buttons can use custom server emojis. Upload the supplied Starship Troopers and Hell Let Loose emblems as emojis, then place their numeric emoji IDs into `config.json`:
-
-```json
-"emojis": {
-  "starship": "YOUR_STARSHIP_EMOJI_ID",
-  "hllv": "YOUR_HLL_EMOJI_ID",
-  "ambassador": "",
-  "returning": "",
-  "pc": "",
-  "xbox": "",
-  "playstation": ""
-}
-```
-
-If left blank, normal Unicode icons are used.
-
-## Role configuration
-
-All category role IDs are optional. Empty IDs are ignored.
-
-```json
-"roles": {
-  "recruit": "",
-  "paths": {
-    "starship": "",
-    "hllv": "",
-    "ambassador": "",
-    "returning": ""
-  },
-  "regions": {
-    "america": "",
-    "europe": "",
-    "asia": "",
-    "africa": "",
-    "oceania": ""
-  },
-  "platforms": {
-    "pc": "",
-    "xbox": "",
-    "playstation": ""
-  },
-  "experience": {
-    "new": "",
-    "some": "",
-    "veteran": "",
-    "expert": ""
-  },
-  "ranks": {
-    "squad_member": "",
-    "squad_lead": "",
-    "platoon_lead": "",
-    "nco": "",
-    "officer": ""
-  }
-}
-```
-
-The bot removes other configured roles in the same category before adding a newly selected role.
-
-## Setup
-
-1. Install Node.js 20 or newer.
-2. Create a Discord application/bot.
-3. Enable **Server Members Intent** in the Discord Developer Portal.
-4. Give the bot:
-   - View Channels
-   - Send Messages
-   - Read Message History
-   - Manage Roles
-   - Use Application Commands
-5. Put the bot role above every role it needs to assign.
-6. Create a `.env` file:
-
-```text
-DISCORD_TOKEN=your_bot_token
-```
-
-7. Set your server ID and optional role IDs in `config.json`.
-8. Run:
-
-```bash
-npm install
-npm start
-```
+1. **After Action Reports** — reports, points, PL snapshots, voice reminders  
+2. **Looking for Troopers** — LFG posts, recruit alerts (count-based), onboarding alerts  
+3. **Tactical Centre** — specialisation question editor (Sentinel / Driller / Top Dog / Doughboy)
 
 ## Railway
 
-Use these environment variables:
+- Start: `node index.js`
+- Env: `TOKEN` or `DISCORD_TOKEN`
+- Volume: `/app/data` (stats + specialisations.json + role-tracking.json)
 
-```text
-DISCORD_TOKEN=your_bot_token
-GUILD_ID=your_server_id
-```
+## Developer Portal intents
 
-Start command:
+- Server Members Intent  
+- Message Content Intent  
+- Guild Voice States (default with voice)
 
-```text
-node index.js
-```
+## Commands
 
-This is a worker bot and does not require a public HTTP port.
+### AAR
+`/setup` `/drops` `/droplist` `/1stmidrops` `/servermembers` `/setstats` `/settotal` `/setall` `/undolast` `/testreminder` `/plpanel`
+
+### Looking for Troopers
+`/count` `/check` `/lfttest` `/lftpost` `/rctpost`
+
+### Rank tracking
+`/ranklist` `/ranktest` `/syncroles` `/memberlookup` `/restoremember`
+
+### Activity stats
+`/me` `/userstats` `/top`
+
+### Tactical Centre
+No slash commands — uses permanent **Edit … Questions** buttons in the four specialisation threads.
+
+### Build Certification
+`/buildpanel` `/buildreload`
+
+## Folders
+
+- `images/` — LFG / Waiting for Game trooper images (count-based)
+  - Naming: `trooper_01_a.png`, `trooper_01_b.jpg`, `trooper_01_c.jpg` … up to `trooper_16_c`
+  - 3 varieties (a/b/c) per count 1–16. Bot rotates varieties and picks by exact number of people in the voice channel.
+- `recruit_alert_images/` — recruit alert images
+  - Naming: `recruit_alert_01.png` … `recruit_alert_10.png`
+  - Selected by the number of recruits currently in Waiting for Game (including the one who just joined).
+- `data/specialisations.json` — TAC question bank  
+- `aar-reminder.mp3` — AAR voice reminder  
+
+## LFT / Recruit behaviour highlights
+
+- When a recruit joins **Waiting for Game**, the bot counts *all* recruits already present (with a short delay to handle Discord voice cache lag) and posts a single alert with the correct count + matching image.
+- Recruit reminder timer also uses the current count image.
+- Company role routing (Demon / Nightmare / Cerberus / Hellfire) sends rank milestone notices to the matching leadership channel and pings the two leadership roles configured for that company. No default fallback channel.
+- `/ranklist` is a public channel post. Run it in a company leadership channel to filter to that company.
+- `/ranktest @user` shows which company channel(s) + roles would be pinged, and also pings the test roles in the channel where the command is run.
+- Role grant: if a member has either `1317610310705741834` or `1319450021426495499`, they are given `1294781406295363705` (if missing). Runs on role add, join, startup, and `/syncroles`. Bot role must be above the granted role and have Manage Roles.
+- Member backup: nickname + roles are saved on change, timeout, kick/leave, and startup. Admins with Manage Roles use `/memberlookup` and `/restoremember`. Restore adds missing roles and sets the saved nick; it does not strip extra roles. View Audit Log is optional (used to label kick vs leave).
+- Activity stats: `/me`, `/userstats`, and `/top` track messages and voice time in 1d / 7d / 45d windows (UTC). Tracking starts when this module is deployed — old Statbot hours cannot be imported without their premium API. Voice sessions already in progress at startup are picked up.
+
+## Important
+
+Stop any separate AAR / LFT / TAC bots before deploying — one token, one process.
