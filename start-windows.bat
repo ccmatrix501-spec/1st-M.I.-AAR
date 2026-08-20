@@ -4,5 +4,5 @@ if not exist node_modules (
   call npm install
 )
 echo Starting 1st M.I. Onboarding Bot...
-node src\index.js
+node index.js
 pause

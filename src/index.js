@@ -20,14 +20,16 @@ const {
 
 const ROOT = path.resolve(__dirname, '..');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
+const CONFIG_EXAMPLE_PATH = path.join(ROOT, 'config.example.json');
 const DEFAULT_GUILD_ID = '1352675653798989947';
 
-if (!fs.existsSync(CONFIG_PATH)) {
-  console.error('Missing config.json. Copy config.example.json to config.json first.');
+const configFile = fs.existsSync(CONFIG_PATH) ? CONFIG_PATH : CONFIG_EXAMPLE_PATH;
+if (!fs.existsSync(configFile)) {
+  console.error('Missing config.json and config.example.json.');
   process.exit(1);
 }
 
-const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
 const token = process.env.DISCORD_TOKEN;
 const guildId = process.env.GUILD_ID || config.guildId || DEFAULT_GUILD_ID;
 

@@ -1,0 +1,25 @@
+{
+  "guildId": "1352675653798989947",
+  "onboardingChannelId": "",
+  "leadershipRoleId": "",
+  "roles": {
+    "paths": {
+      "starship": "",
+      "hllv": "",
+      "ambassador": "",
+      "returning": ""
+    },
+    "regions": {
+      "america": "",
+      "europe": "",
+      "asia": "",
+      "africa": "",
+      "oceania": ""
+    },
+    "platforms": {
+      "pc": "",
+      "xbox": "",
+      "playstation": ""
+    }
+  }
+}

@@ -78,3 +78,29 @@ On Windows you can also double-click `start-windows.bat`.
 - The bot removes the previous role in the same category before assigning a new one.
 - Onboarding state is kept in memory. Restarting the bot resets active test sessions.
 - Button presses only affect the person who pressed them.
+
+## Railway deploy
+
+The crash `Cannot find module '/app/index.js'` happens when Railway starts `node index.js` from the wrong folder, or the zip has an extra nested folder.
+
+Use the railway zip in this package: files must sit at the **repo/service root**, not inside `1st-mi-onboarding-bot/`.
+
+1. In Railway, create a new service from the GitHub repo or upload this folder.
+2. If the repo has this bot in a subfolder, set **Root Directory** to that folder.
+3. Set start command to:
+
+```text
+node index.js
+```
+
+4. Add these variables:
+
+```text
+DISCORD_TOKEN=your_bot_token
+GUILD_ID=1352675653798989947
+```
+
+5. Enable **Server Members Intent** on the Discord application.
+6. Redeploy. The logs should show `Logged in as ...` then `Registered slash commands for guild 1352675653798989947`.
+
+This is a Discord worker, not a website. You do not need a public HTTP port.

@@ -1,13 +1,16 @@
 {
   "name": "1st-mi-onboarding-bot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Test onboarding flow for the 1st Mobile Infantry Discord server",
-  "main": "src/index.js",
+  "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node index.js",
     "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "discord.js": "^14.22.1",
