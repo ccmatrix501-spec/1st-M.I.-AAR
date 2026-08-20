@@ -15,6 +15,8 @@ This is the test onboarding flow, modified so it can run in your personal test s
 
 ## Current flow
 
+Copy and step titles now follow the mockup. Discord still uses native buttons under the embed, not clickable rows inside an image.
+
 ### Step 1 — What are you here for?
 - Starship Troopers
 - Hell Let Loose: Vietnam
@@ -22,24 +24,19 @@ This is the test onboarding flow, modified so it can run in your personal test s
 - Returning Member
 
 ### Step 2 — Region
-- America
-- Europe
-- Asia
-- Africa
-- Oceania
+- America / Europe / Asia / Africa / Oceania
 
 ### Step 3
-**Starship Troopers / Hell Let Loose: Vietnam**
-- PC
-- Xbox
-- PlayStation
+**Starship Troopers / Hell Let Loose: Vietnam** — PC / Xbox / PlayStation
 
-**Ambassador / Returning Member**
-- Rules & Conduct
-- I Agree
-- I Do Not Agree
+**Ambassador / Returning Member** — Rules & Conduct, then I Agree / I Do Not Agree
 
-This test build stops after Step 3.
+### Step 4
+**Games** — New Recruit / Some Experience / Veteran / Expert
+
+**Ambassador** — community / unit name (modal)
+
+**Returning Member** — previous 1st M.I. name (modal), then previous rank
 
 ## Setup
 

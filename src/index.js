@@ -12,10 +12,13 @@ const {
   Events,
   GatewayIntentBits,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require('discord.js');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -30,11 +33,12 @@ if (!fs.existsSync(configFile)) {
 }
 
 const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-const token = process.env.DISCORD_TOKEN;
+const token = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN || process.env.BOT_TOKEN;
 const guildId = process.env.GUILD_ID || config.guildId || DEFAULT_GUILD_ID;
 
 if (!token) {
-  console.error('Missing DISCORD_TOKEN in .env');
+  console.error('Missing DISCORD_TOKEN.');
+  console.error('On Railway: open this service → Variables → add DISCORD_TOKEN → Redeploy.');
   process.exit(1);
 }
 
@@ -42,14 +46,20 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
-// Test-build session storage. Keyed by Discord user ID.
 const sessions = new Map();
 
 const COLORS = {
-  gold: 0x9c7b3e,
+  gold: 0xc4a35a,
   dark: 0x111315,
-  green: 0x2f7d32,
-  red: 0xa23232,
+  green: 0x1f6b3a,
+  red: 0x8b1e1e,
+};
+
+const PATH_LABELS = {
+  starship: 'Starship Troopers',
+  hllv: 'Hell Let Loose: Vietnam',
+  ambassador: 'Ambassador',
+  returning: 'Returning Member',
 };
 
 function asset(name) {
@@ -60,15 +70,21 @@ function logoAttachment() {
   return new AttachmentBuilder(asset('1st-mi-logo.png'), { name: '1st-mi-logo.png' });
 }
 
+function emptySession() {
+  return {
+    path: null,
+    region: null,
+    platform: null,
+    rulesAccepted: false,
+    previousName: null,
+    community: null,
+    experience: null,
+    previousRank: null,
+  };
+}
+
 function getSession(userId) {
-  if (!sessions.has(userId)) {
-    sessions.set(userId, {
-      path: null,
-      region: null,
-      platform: null,
-      rulesAccepted: false,
-    });
-  }
+  if (!sessions.has(userId)) sessions.set(userId, emptySession());
   return sessions.get(userId);
 }
 
@@ -96,69 +112,43 @@ async function replaceCategoryRole(member, roleMap, selectedKey) {
   }
 }
 
-function baseEmbed() {
+function stepEmbed(stepLabel, title, body) {
   return new EmbedBuilder()
     .setColor(COLORS.gold)
-    .setFooter({ text: 'Your onboarding responses are visible only to you and leadership staff.' })
-    .setTimestamp();
+    .setAuthor({ name: stepLabel })
+    .setTitle(title)
+    .setDescription(body)
+    .setThumbnail('attachment://1st-mi-logo.png')
+    .setFooter({ text: 'Your answers are private and will only be seen by leadership staff.' });
 }
 
 function welcomeEmbed() {
-  return baseEmbed()
-    .setTitle('WELCOME, RECRUIT. — 1ST MOBILE INFANTRY')
-    .setDescription(
-      [
-        'Before you gain full access to the unit, we need to get a few details from you.',
-        '',
-        '**WHAT ARE YOU HERE FOR?**',
-        'Choose the option that best describes why you are joining the server.',
-      ].join('\n')
-    )
-    .setThumbnail('attachment://1st-mi-logo.png');
+  return stepEmbed(
+    'ONBOARDING — STEP 1 OF ?',
+    'WHAT ARE YOU HERE FOR?',
+    'Please select the option that best describes why you\'re here.'
+  );
 }
 
 function welcomeComponents() {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('path:starship')
-        .setLabel('Starship Troopers')
-        .setEmoji('🪐')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('path:hllv')
-        .setLabel('Hell Let Loose: Vietnam')
-        .setEmoji('⚔️')
-        .setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('path:starship').setLabel('Starship Troopers').setEmoji('🪖').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('path:hllv').setLabel('Hell Let Loose: Vietnam').setEmoji('⚔️').setStyle(ButtonStyle.Secondary)
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('path:ambassador')
-        .setLabel('Ambassador')
-        .setEmoji('🤝')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('path:returning')
-        .setLabel('Returning Member')
-        .setEmoji('🛡️')
-        .setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('path:ambassador').setLabel('Ambassador').setEmoji('🤝').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('path:returning').setLabel('Returning Member').setEmoji('🛡️').setStyle(ButtonStyle.Secondary)
     ),
   ];
 }
 
-function regionEmbed(session) {
-  const selected = session.path ? session.path.toUpperCase() : 'NOT SET';
-  return baseEmbed()
-    .setTitle('ONBOARDING — STEP 2')
-    .setDescription(
-      [
-        `**Selected path:** ${selected}`,
-        '',
-        '# WHAT REGION ARE YOU FROM?',
-        'This helps us connect you with members in your region and organize events and communications.',
-      ].join('\n')
-    )
-    .setThumbnail('attachment://1st-mi-logo.png');
+function regionEmbed() {
+  return stepEmbed(
+    'ONBOARDING — STEP 2 OF ?',
+    'WHAT REGION ARE YOU FROM?',
+    'This helps us connect you with members in your region and keep things running smoothly.'
+  );
 }
 
 function regionComponents() {
@@ -175,82 +165,182 @@ function regionComponents() {
   ];
 }
 
-function platformEmbed(session) {
-  const game = session.path === 'starship' ? 'Starship Troopers' : 'Hell Let Loose: Vietnam';
-  return baseEmbed()
-    .setTitle('ONBOARDING — STEP 3')
-    .setDescription(
-      [
-        `**${game}**`,
-        '',
-        '# WHAT PLATFORM DO YOU PLAY ON?',
-        'Please select the platform you primarily play on.',
-      ].join('\n')
-    )
-    .setThumbnail('attachment://1st-mi-logo.png');
+function platformEmbed() {
+  return stepEmbed(
+    'ONBOARDING — STEP 3 OF ?',
+    'WHAT PLATFORM DO YOU PLAY ON?',
+    'Please select the platform you primarily play on so we can connect you with the right members and events.'
+  );
 }
 
 function platformComponents() {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('platform:pc').setLabel('PC').setEmoji('🖥️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('platform:xbox').setLabel('Xbox').setEmoji('🎮').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('platform:playstation').setLabel('PlayStation').setEmoji('🎮').setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('platform:xbox').setLabel('Xbox').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('platform:playstation').setLabel('PlayStation').setEmoji('🕹️').setStyle(ButtonStyle.Secondary)
     ),
   ];
 }
 
 function rulesEmbed(session) {
-  const who = session.path === 'ambassador' ? 'AMBASSADOR' : 'RETURNING MEMBER';
-  return baseEmbed()
-    .setTitle('ONBOARDING — STEP 3 | RULES & CONDUCT')
-    .setDescription(
-      [
-        `**PATH: ${who}**`,
-        '',
-        '⚠️ **YOU MUST ACCEPT THESE RULES TO CONTINUE**',
-        '',
-        '• Respect all members and leadership.',
-        '• No harassment, discrimination, or disruptive behaviour.',
-        '• Follow Discord and community rules.',
-        '• Do not impersonate staff or misrepresent the 1st M.I.',
-        '• Ambassadors must act professionally when representing another community.',
-        '• Returning members are subject to current rules regardless of previous rank or status.',
-        '• Leadership decisions regarding access and membership must be respected.',
-        '',
-        '**Do you understand and agree to follow the 1st M.I. rules?**',
-      ].join('\n')
-    )
-    .setThumbnail('attachment://1st-mi-logo.png');
+  const returning = session.path === 'returning';
+  const extras = returning
+    ? [
+        '🛡️ Returning members are still subject to current rules regardless of previous rank/status.',
+        '⭐ Leadership decisions regarding access and membership must be respected.',
+      ]
+    : [
+        '👥 Ambassadors must act professionally when representing another community.',
+        '⭐ Leadership decisions regarding access and membership must be respected.',
+      ];
+
+  return stepEmbed(
+    'ONBOARDING — STEP 3 OF ?',
+    '1ST MOBILE INFANTRY RULES & CONDUCT',
+    [
+      '🚨 **YOU MUST ACCEPT THESE RULES TO CONTINUE**',
+      '',
+      '🤝 Respect all members and leadership.',
+      '🛡️ No harassment, discrimination, or disruptive behaviour.',
+      '📜 Follow Discord and community rules.',
+      '👤 Do not impersonate staff or misrepresent the 1st M.I.',
+      ...extras,
+      '',
+      'Do you understand and agree to follow the 1st M.I. rules?',
+    ].join('\n')
+  );
 }
 
 function rulesComponents() {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('rules:agree').setLabel('I Agree').setEmoji('✅').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('rules:decline').setLabel('I Do Not Agree').setEmoji('✖️').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('rules:agree').setLabel('I AGREE').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('rules:decline').setLabel('I DO NOT AGREE').setEmoji('❌').setStyle(ButtonStyle.Danger)
     ),
   ];
 }
 
-function completeEmbed(session) {
-  const pretty = value => value ? value.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—';
+function experienceEmbed() {
+  return stepEmbed(
+    'ONBOARDING — STEP 4 OF ?',
+    'HOW MUCH EXPERIENCE DO YOU HAVE?',
+    'Please select the option that best describes your experience.'
+  );
+}
 
-  return baseEmbed()
+function experienceComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('experience:new').setLabel('New Recruit').setEmoji('🪖').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('experience:some').setLabel('Some Experience').setEmoji('🔺').setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('experience:veteran').setLabel('Veteran').setEmoji('🎖️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('experience:expert').setLabel('Expert').setEmoji('⭐').setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+function previousNameEmbed() {
+  return stepEmbed(
+    'ONBOARDING — STEP 4 OF ?',
+    'WHAT WAS YOUR PREVIOUS 1ST M.I. NAME?',
+    [
+      'Please enter the name or callsign you previously used in the 1st Mobile Infantry.',
+      '',
+      'This helps our leadership verify your previous membership.',
+    ].join('\n')
+  );
+}
+
+function previousNameComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('open:previousName').setLabel('Enter your previous name').setEmoji('📝').setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+function communityEmbed() {
+  return stepEmbed(
+    'ONBOARDING — STEP 4 OF ?',
+    'WHAT COMMUNITY DO YOU REPRESENT?',
+    [
+      'Please enter the name of the community or unit you represent.',
+      '',
+      'This helps us recognize and work with your community.',
+    ].join('\n')
+  );
+}
+
+function communityComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('open:community').setLabel('Enter community / unit name').setEmoji('📝').setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+function rankEmbed() {
+  return stepEmbed(
+    'ONBOARDING — STEP 4 OF ?',
+    'WHAT WAS YOUR PREVIOUS RANK OR ROLE?',
+    'Please select the option that best describes your previous position.'
+  );
+}
+
+function rankComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rank:squad_member').setLabel('Squad Member').setEmoji('🪖').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('rank:squad_lead').setLabel('Squad Lead').setEmoji('🔺').setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rank:platoon_lead').setLabel('Platoon Lead').setEmoji('🎖️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('rank:nco').setLabel('NCO').setEmoji('🛡️').setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rank:officer').setLabel('Officer / Staff').setEmoji('⭐').setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+function pretty(value) {
+  if (!value) return '—';
+  return String(value).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function completeEmbed(session) {
+  const lines = [
+    `**Path:** ${PATH_LABELS[session.path] || pretty(session.path)}`,
+    `**Region:** ${pretty(session.region)}`,
+  ];
+
+  if (session.platform) lines.push(`**Platform:** ${pretty(session.platform)}`);
+  if (session.experience) lines.push(`**Experience:** ${pretty(session.experience)}`);
+  if (session.community) lines.push(`**Community:** ${session.community}`);
+  if (session.previousName) lines.push(`**Previous name:** ${session.previousName}`);
+  if (session.previousRank) lines.push(`**Previous rank:** ${pretty(session.previousRank)}`);
+  if (session.path === 'ambassador' || session.path === 'returning') {
+    lines.push(`**Rules accepted:** ${session.rulesAccepted ? 'Yes' : 'No'}`);
+  }
+
+  return new EmbedBuilder()
     .setColor(COLORS.green)
+    .setAuthor({ name: 'ONBOARDING COMPLETE' })
     .setTitle('TEST ONBOARDING COMPLETE')
     .setDescription(
       [
         'You have reached the end of the currently designed test flow.',
         '',
-        `**Path:** ${pretty(session.path)}`,
-        `**Region:** ${pretty(session.region)}`,
-        `**Platform:** ${pretty(session.platform)}`,
-        `**Rules accepted:** ${session.rulesAccepted ? 'Yes' : 'N/A'}`,
+        ...lines,
         '',
         'More onboarding steps can be added after this point.',
       ].join('\n')
-    );
+    )
+    .setThumbnail('attachment://1st-mi-logo.png')
+    .setFooter({ text: 'Your answers are private and will only be seen by leadership staff.' });
 }
 
 function restartComponents() {
@@ -261,6 +351,40 @@ function restartComponents() {
   ];
 }
 
+function previousNameModal() {
+  return new ModalBuilder()
+    .setCustomId('modal:previousName')
+    .setTitle('Previous 1st M.I. name')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('previousName')
+          .setLabel('Previous name or callsign')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Enter your previous name...')
+          .setRequired(true)
+          .setMaxLength(80)
+      )
+    );
+}
+
+function communityModal() {
+  return new ModalBuilder()
+    .setCustomId('modal:community')
+    .setTitle('Community / unit name')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('community')
+          .setLabel('Community or unit you represent')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Enter community / unit name...')
+          .setRequired(true)
+          .setMaxLength(80)
+      )
+    );
+}
+
 async function presentOnboarding(interaction, embed, components = []) {
   const payload = {
     embeds: [embed],
@@ -269,6 +393,16 @@ async function presentOnboarding(interaction, embed, components = []) {
   };
 
   const isEphemeral = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+
+  if (interaction.isModalSubmit()) {
+    try {
+      await interaction.update(payload);
+      return;
+    } catch {
+      await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+      return;
+    }
+  }
 
   if (interaction.isButton() && isEphemeral) {
     await interaction.update(payload);
@@ -335,7 +469,6 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'onboarding-panel') {
         await interaction.reply({
-          content: '**1st M.I. Recruitment Bot** — Select an option below to begin.',
           embeds: [welcomeEmbed()],
           components: welcomeComponents(),
           files: [logoAttachment()],
@@ -353,6 +486,23 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
+    if (interaction.isModalSubmit()) {
+      const session = getSession(interaction.user.id);
+      const [, kind] = interaction.customId.split(':');
+
+      if (kind === 'previousName') {
+        session.previousName = interaction.fields.getTextInputValue('previousName').trim();
+        await presentOnboarding(interaction, rankEmbed(), rankComponents());
+        return;
+      }
+
+      if (kind === 'community') {
+        session.community = interaction.fields.getTextInputValue('community').trim();
+        await presentOnboarding(interaction, completeEmbed(session), restartComponents());
+        return;
+      }
+    }
+
     if (!interaction.isButton()) return;
 
     const member = interaction.member;
@@ -365,13 +515,21 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
+    if (group === 'open') {
+      if (value === 'previousName') {
+        await interaction.showModal(previousNameModal());
+        return;
+      }
+      if (value === 'community') {
+        await interaction.showModal(communityModal());
+        return;
+      }
+    }
+
     if (group === 'path') {
-      session.path = value;
-      session.region = null;
-      session.platform = null;
-      session.rulesAccepted = false;
+      Object.assign(session, emptySession(), { path: value });
       await replaceCategoryRole(member, config.roles?.paths, value);
-      await presentOnboarding(interaction, regionEmbed(session), regionComponents());
+      await presentOnboarding(interaction, regionEmbed(), regionComponents());
       return;
     }
 
@@ -380,7 +538,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await replaceCategoryRole(member, config.roles?.regions, value);
 
       if (session.path === 'starship' || session.path === 'hllv') {
-        await presentOnboarding(interaction, platformEmbed(session), platformComponents());
+        await presentOnboarding(interaction, platformEmbed(), platformComponents());
       } else if (session.path === 'ambassador' || session.path === 'returning') {
         await presentOnboarding(interaction, rulesEmbed(session), rulesComponents());
       } else {
@@ -395,6 +553,20 @@ client.on(Events.InteractionCreate, async interaction => {
     if (group === 'platform') {
       session.platform = value;
       await replaceCategoryRole(member, config.roles?.platforms, value);
+      await presentOnboarding(interaction, experienceEmbed(), experienceComponents());
+      return;
+    }
+
+    if (group === 'experience') {
+      session.experience = value;
+      await replaceCategoryRole(member, config.roles?.experience, value);
+      await presentOnboarding(interaction, completeEmbed(session), restartComponents());
+      return;
+    }
+
+    if (group === 'rank') {
+      session.previousRank = value;
+      await replaceCategoryRole(member, config.roles?.ranks, value);
       await presentOnboarding(interaction, completeEmbed(session), restartComponents());
       return;
     }
@@ -402,18 +574,26 @@ client.on(Events.InteractionCreate, async interaction => {
     if (group === 'rules') {
       if (value === 'agree') {
         session.rulesAccepted = true;
-        await presentOnboarding(interaction, completeEmbed(session), restartComponents());
+        if (session.path === 'returning') {
+          await presentOnboarding(interaction, previousNameEmbed(), previousNameComponents());
+        } else {
+          await presentOnboarding(interaction, communityEmbed(), communityComponents());
+        }
       } else {
         session.rulesAccepted = false;
-        const denied = baseEmbed()
-          .setColor(COLORS.red)
-          .setTitle('ONBOARDING PAUSED')
-          .setDescription('You must accept the 1st M.I. rules and conduct requirements before continuing.');
-        await presentOnboarding(interaction, denied, [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('rules:agree').setLabel('I Agree').setEmoji('✅').setStyle(ButtonStyle.Success)
-          ),
-        ]);
+        await presentOnboarding(
+          interaction,
+          stepEmbed(
+            'ONBOARDING PAUSED',
+            'RULES NOT ACCEPTED',
+            'You must accept the 1st M.I. rules and conduct requirements before continuing.'
+          ).setColor(COLORS.red),
+          [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('rules:agree').setLabel('I AGREE').setEmoji('✅').setStyle(ButtonStyle.Success)
+            ),
+          ]
+        );
       }
     }
   } catch (err) {

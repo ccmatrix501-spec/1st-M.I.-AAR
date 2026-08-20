@@ -20,6 +20,19 @@
       "pc": "",
       "xbox": "",
       "playstation": ""
+    },
+    "experience": {
+      "new": "",
+      "some": "",
+      "veteran": "",
+      "expert": ""
+    },
+    "ranks": {
+      "squad_member": "",
+      "squad_lead": "",
+      "platoon_lead": "",
+      "nco": "",
+      "officer": ""
     }
   }
 }
