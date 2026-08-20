@@ -9,22 +9,22 @@ const {
   ButtonStyle,
   Client,
   ContainerBuilder,
-  EmbedBuilder,
   Events,
   GatewayIntentBits,
-  MediaGalleryBuilder,
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
   REST,
   Routes,
+  SectionBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   SlashCommandBuilder,
   TextDisplayBuilder,
   TextInputBuilder,
   TextInputStyle,
+  ThumbnailBuilder,
 } = require('discord.js');
-
-const V2_FLAGS = MessageFlags.IsComponentsV2 ?? (1 << 15);
 
 const ROOT = path.resolve(__dirname, '..');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
@@ -55,9 +55,8 @@ const sessions = new Map();
 
 const COLORS = {
   gold: 0xc4a35a,
-  dark: 0x111315,
-  green: 0x1f6b3a,
-  red: 0x8b1e1e,
+  green: 0x3ba55d,
+  red: 0xed4245,
 };
 
 const PATH_LABELS = {
@@ -71,81 +70,69 @@ function asset(name) {
   return path.join(ROOT, 'assets', name);
 }
 
-function cardFile(name) {
-  return path.join(ROOT, 'assets', 'cards', name);
-}
-
-const CARD_NAMES = [
-  'step1.png',
-  'step2.png',
-  'step3-platform.png',
-  'step3-rules-ambassador.png',
-  'step3-rules-returning.png',
-  'step4-experience.png',
-  'step4-name.png',
-  'step4-community.png',
-  'step4-rank.png',
-  'complete.png',
-  'paused.png',
-];
-
-function readCardBase64(dir, name) {
-  const b64Path = path.join(dir, `${name}.b64`);
-  if (fs.existsSync(b64Path)) {
-    const raw = fs.readFileSync(b64Path, 'utf8').trim();
-    if (raw.length > 100) return raw.replace(/\s+/g, '');
-  }
-
-  const parts = fs.readdirSync(dir)
-    .filter(file => file.startsWith(`${name}.b64.p`))
-    .sort();
-  if (!parts.length) return null;
-  return parts.map(file => fs.readFileSync(path.join(dir, file), 'utf8').trim()).join('').replace(/\s+/g, '');
-}
-
-function ensureCards() {
-  const dir = path.join(ROOT, 'assets', 'cards');
-  fs.mkdirSync(dir, { recursive: true });
-  for (const name of CARD_NAMES) {
-    const pngPath = path.join(dir, name);
-    if (fs.existsSync(pngPath)) continue;
-    const b64 = readCardBase64(dir, name);
-    if (!b64) continue;
-    try {
-      fs.writeFileSync(pngPath, Buffer.from(b64, 'base64'));
-    } catch (err) {
-      console.warn(`Could not decode ${name}:`, err.message);
-    }
-  }
-}
-
-ensureCards();
-
-function hasCard(name) {
-  return fs.existsSync(cardFile(name));
-}
-
-function cardAttachment(name) {
-  if (hasCard(name)) {
-    return new AttachmentBuilder(cardFile(name), { name });
-  }
+function logoAttachment() {
   return new AttachmentBuilder(asset('1st-mi-logo.png'), { name: '1st-mi-logo.png' });
 }
 
-function cardEmbed(name, extraDescription) {
-  if (hasCard(name)) {
-    const embed = new EmbedBuilder()
-      .setColor(COLORS.dark)
-      .setImage(`attachment://${name}`);
-    if (extraDescription) embed.setDescription(extraDescription);
-    return embed;
+function logoThumbnail() {
+  return new ThumbnailBuilder()
+    .setURL('attachment://1st-mi-logo.png')
+    .setDescription('1st Mobile Infantry emblem');
+}
+
+function text(content) {
+  return new TextDisplayBuilder().setContent(content);
+}
+
+function divider(spacing = SeparatorSpacingSize.Small) {
+  return new SeparatorBuilder().setDivider(true).setSpacing(spacing);
+}
+
+function privacyFooter() {
+  return '-# 🛡️ Your answers are private and will only be seen by leadership staff.';
+}
+
+function buildPanel({
+  step,
+  title,
+  description,
+  body,
+  rows = [],
+  accent = COLORS.gold,
+  footer = privacyFooter(),
+}) {
+  const container = new ContainerBuilder().setAccentColor(accent);
+
+  const header = new SectionBuilder()
+    .addTextDisplayComponents(
+      text(
+        `### 1ST MOBILE INFANTRY\n` +
+        `**RECRUITMENT & ONBOARDING**\n\n` +
+        `-# ${step}\n` +
+        `## ${title}\n` +
+        `${description}`
+      )
+    )
+    .setThumbnailAccessory(logoThumbnail());
+
+  container.addSectionComponents(header);
+
+  if (body) {
+    container.addSeparatorComponents(divider());
+    container.addTextDisplayComponents(text(body));
   }
 
-  return new EmbedBuilder()
-    .setColor(COLORS.gold)
-    .setTitle(name.replace('.png', '').toUpperCase())
-    .setDescription(extraDescription || 'Upload assets/cards to the GitHub repo, then redeploy.')
-    .setThumbnail('attachment://1st-mi-logo.png');
+  if (rows.length) {
+    container.addSeparatorComponents(divider());
+    for (const row of rows) container.addActionRowComponents(row);
+  }
+
+  if (footer) {
+    container.addSeparatorComponents(divider());
+    container.addTextDisplayComponents(text(footer));
+  }
+
+  return container;
 }
 
 function emptySession() {
@@ -158,6 +145,7 @@ function emptySession() {
     community: null,
     experience: null,
     previousRank: null,
+    recruitRoleId: null,
   };
 }
 
@@ -190,140 +178,192 @@ async function replaceCategoryRole(member, roleMap, selectedKey) {
   }
 }
 
-function stackedButtons(items) {
-  return items.map(([id, label, emoji, style]) =>
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
+function configuredEmoji(key, fallback) {
+  const value = config.emojis?.[key];
+  if (!value) return fallback;
+
+  if (/^\d+$/.test(String(value))) {
+    return { id: String(value), name: key };
+  }
+
+  return value;
+}
+
+function withRecruitRole(customId, recruitRoleId) {
+  return recruitRoleId ? `${customId}:${recruitRoleId}` : customId;
+}
+
+function resolveRecruitRoleId(session, interactionRoleId) {
+  const roleId = interactionRoleId || session.recruitRoleId || config.roles?.recruit || null;
+  if (roleId) session.recruitRoleId = String(roleId);
+  return session.recruitRoleId;
+}
+
+async function awardRecruitRole(member, session) {
+  const roleId = resolveRecruitRoleId(session);
+  if (!roleId) {
+    console.warn('Onboarding completed, but no Recruit role was configured for this panel.');
+    return false;
+  }
+
+  try {
+    if (!member.roles.cache.has(roleId)) await member.roles.add(roleId);
+    return true;
+  } catch (err) {
+    console.warn(`Could not add Recruit role ${roleId}:`, err.message);
+    return false;
+  }
+}
+
+function buttonRows(items, perRow = 2) {
+  const rows = [];
+
+  for (let i = 0; i < items.length; i += perRow) {
+    const row = new ActionRowBuilder();
+    for (const [id, label, emoji, style] of items.slice(i, i + perRow)) {
+      const button = new ButtonBuilder()
         .setCustomId(id)
         .setLabel(label)
-        .setEmoji(emoji)
-        .setStyle(style || ButtonStyle.Secondary)
-    )
-  );
-}
+        .setStyle(style || ButtonStyle.Secondary);
 
-function panelPayload(embed, components = []) {
-  const cardName = currentCardName(embed);
-  const fileName = hasCard(cardName) ? cardName : '1st-mi-logo.png';
-  const extra = embed?.data?.description || null;
-
-  const container = new ContainerBuilder().setAccentColor(COLORS.gold);
-  container.addMediaGalleryComponents(
-    new MediaGalleryBuilder().addItems(item => item.setURL(`attachment://${fileName}`).setDescription('1st M.I. onboarding'))
-  );
-  if (extra) {
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(extra));
-  }
-  for (const row of components) {
-    container.addActionRowComponents(row);
+      if (emoji) button.setEmoji(emoji);
+      row.addComponents(button);
+    }
+    rows.push(row);
   }
 
-  return {
-    content: null,
-    embeds: [],
-    components: [container],
-    files: [cardAttachment(cardName)],
-    flags: V2_FLAGS,
-  };
+  return rows;
 }
 
-function welcomeEmbed() {
-  return cardEmbed('step1.png');
+function welcomePanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 1',
+    title: 'WHAT ARE YOU HERE FOR?',
+    description: 'Please select the option that best describes why you’re here.',
+    rows: buttonRows([
+      [withRecruitRole('path:starship', recruitRoleId), 'STARSHIP TROOPERS', configuredEmoji('starship', '🪖')],
+      [withRecruitRole('path:hllv', recruitRoleId), 'HELL LET LOOSE: VIETNAM', configuredEmoji('hllv', '⚔️')],
+      [withRecruitRole('path:ambassador', recruitRoleId), 'AMBASSADOR', configuredEmoji('ambassador', '🤝')],
+      [withRecruitRole('path:returning', recruitRoleId), 'RETURNING MEMBER', configuredEmoji('returning', '↩️')],
+    ], 2),
+  });
 }
 
-function welcomeComponents() {
-  return stackedButtons([
-    ['path:starship', 'STARSHIP TROOPERS', '🪖'],
-    ['path:hllv', 'HELL LET LOOSE: VIETNAM', '⚔️'],
-    ['path:ambassador', 'AMBASSADOR', '🤝'],
-    ['path:returning', 'RETURNING MEMBER', '🛡️'],
-  ]);
+function regionPanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 2',
+    title: 'WHAT REGION ARE YOU FROM?',
+    description: 'This helps us connect you with members in your region and keep things running smoothly.',
+    rows: buttonRows([
+      [withRecruitRole('region:america', recruitRoleId), 'AMERICA', '🌎'],
+      [withRecruitRole('region:europe', recruitRoleId), 'EUROPE', '🌍'],
+      [withRecruitRole('region:asia', recruitRoleId), 'ASIA', '🌏'],
+      [withRecruitRole('region:africa', recruitRoleId), 'AFRICA', '🌍'],
+      [withRecruitRole('region:oceania', recruitRoleId), 'OCEANIA', '🇦🇺'],
+    ], 3),
+  });
 }
 
-function regionEmbed() {
-  return cardEmbed('step2.png');
+function platformPanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 3',
+    title: 'WHAT PLATFORM DO YOU PLAY ON?',
+    description: 'Please select the platform you primarily play on.',
+    rows: buttonRows([
+      [withRecruitRole('platform:pc', recruitRoleId), 'PC', configuredEmoji('pc', '🖥️')],
+      [withRecruitRole('platform:xbox', recruitRoleId), 'XBOX', configuredEmoji('xbox', '🎮')],
+      [withRecruitRole('platform:playstation', recruitRoleId), 'PLAYSTATION', configuredEmoji('playstation', '🎮')],
+    ], 3),
+  });
 }
 
-function regionComponents() {
-  return stackedButtons([
-    ['region:america', 'AMERICA', '🌎'],
-    ['region:europe', 'EUROPE', '🌍'],
-    ['region:asia', 'ASIA', '🌏'],
-    ['region:africa', 'AFRICA', '🌍'],
-    ['region:oceania', 'OCEANIA', '🇦🇺'],
-  ]);
+function rulesPanel(session, recruitRoleId) {
+  const returningLine = session.path === 'returning'
+    ? '\n• Returning members are still subject to current rules regardless of previous rank or status.'
+    : '';
+  const ambassadorLine = session.path === 'ambassador'
+    ? '\n• Ambassadors must act professionally when representing another community.'
+    : '';
+
+  return buildPanel({
+    step: 'ONBOARDING — STEP 3',
+    title: '1ST MOBILE INFANTRY — RULES & CONDUCT',
+    description: '**⚠️ YOU MUST ACCEPT THESE RULES TO CONTINUE**',
+    body:
+      '• Respect all members and leadership.\n' +
+      '• No harassment, discrimination, or disruptive behaviour.\n' +
+      '• Follow Discord and community rules.\n' +
+      '• Do not impersonate staff or misrepresent the 1st M.I.' +
+      ambassadorLine +
+      returningLine +
+      '\n• Leadership decisions regarding access and membership must be respected.\n\n' +
+      '**Do you understand and agree to follow the 1st M.I. rules?**',
+    rows: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(withRecruitRole('rules:agree', recruitRoleId))
+          .setLabel('I AGREE')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(withRecruitRole('rules:decline', recruitRoleId))
+          .setLabel('I DO NOT AGREE')
+          .setEmoji('❌')
+          .setStyle(ButtonStyle.Danger)
+      ),
+    ],
+  });
 }
 
-function platformEmbed() {
-  return cardEmbed('step3-platform.png');
+function experiencePanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 4',
+    title: 'HOW MUCH EXPERIENCE DO YOU HAVE?',
+    description: 'Please select the option that best describes your experience.',
+    rows: buttonRows([
+      [withRecruitRole('experience:new', recruitRoleId), 'NEW RECRUIT', '🪖'],
+      [withRecruitRole('experience:some', recruitRoleId), 'SOME EXPERIENCE', '🔺'],
+      [withRecruitRole('experience:veteran', recruitRoleId), 'VETERAN', '🎖️'],
+      [withRecruitRole('experience:expert', recruitRoleId), 'EXPERT', '⭐'],
+    ], 2),
+  });
 }
 
-function platformComponents() {
-  return stackedButtons([
-    ['platform:pc', 'PC', '🖥️'],
-    ['platform:xbox', 'XBOX', '🎮'],
-    ['platform:playstation', 'PLAYSTATION', '🕹️'],
-  ]);
+function previousNamePanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 4',
+    title: 'WHAT WAS YOUR PREVIOUS 1ST M.I. NAME?',
+    description: 'Enter the name or callsign you previously used in the 1st Mobile Infantry.',
+    rows: buttonRows([
+      [withRecruitRole('open:previousName', recruitRoleId), 'ENTER PREVIOUS NAME', '📝'],
+    ], 1),
+  });
 }
 
-function rulesEmbed(session) {
-  return cardEmbed(session.path === 'returning' ? 'step3-rules-returning.png' : 'step3-rules-ambassador.png');
+function communityPanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 4',
+    title: 'WHAT COMMUNITY DO YOU REPRESENT?',
+    description: 'Enter the name of the community or unit you represent.',
+    rows: buttonRows([
+      [withRecruitRole('open:community', recruitRoleId), 'ENTER COMMUNITY / UNIT NAME', '📝'],
+    ], 1),
+  });
 }
 
-function rulesComponents() {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('rules:agree').setLabel('I AGREE').setEmoji('✅').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('rules:decline').setLabel('I DO NOT AGREE').setEmoji('❌').setStyle(ButtonStyle.Danger)
-    ),
-  ];
-}
-
-function experienceEmbed() {
-  return cardEmbed('step4-experience.png');
-}
-
-function experienceComponents() {
-  return stackedButtons([
-    ['experience:new', 'NEW RECRUIT', '🪖'],
-    ['experience:some', 'SOME EXPERIENCE', '🔺'],
-    ['experience:veteran', 'VETERAN', '🎖️'],
-    ['experience:expert', 'EXPERT', '⭐'],
-  ]);
-}
-
-function previousNameEmbed() {
-  return cardEmbed('step4-name.png');
-}
-
-function previousNameComponents() {
-  return stackedButtons([
-    ['open:previousName', 'ENTER YOUR PREVIOUS NAME', '📝'],
-  ]);
-}
-
-function communityEmbed() {
-  return cardEmbed('step4-community.png');
-}
-
-function communityComponents() {
-  return stackedButtons([
-    ['open:community', 'ENTER COMMUNITY / UNIT NAME', '📝'],
-  ]);
-}
-
-function rankEmbed() {
-  return cardEmbed('step4-rank.png');
-}
-
-function rankComponents() {
-  return stackedButtons([
-    ['rank:squad_member', 'SQUAD MEMBER', '🪖'],
-    ['rank:squad_lead', 'SQUAD LEAD', '🔺'],
-    ['rank:platoon_lead', 'PLATOON LEAD', '🎖️'],
-    ['rank:nco', 'NCO', '🛡️'],
-    ['rank:officer', 'OFFICER / STAFF', '⭐'],
-  ]);
+function rankPanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING — STEP 5',
+    title: 'WHAT WAS YOUR PREVIOUS RANK OR ROLE?',
+    description: 'Please select the option that best describes your previous position.',
+    rows: buttonRows([
+      [withRecruitRole('rank:squad_member', recruitRoleId), 'SQUAD MEMBER', '🪖'],
+      [withRecruitRole('rank:squad_lead', recruitRoleId), 'SQUAD LEAD', '🔺'],
+      [withRecruitRole('rank:platoon_lead', recruitRoleId), 'PLATOON LEAD', '🎖️'],
+      [withRecruitRole('rank:nco', recruitRoleId), 'NCO', '🛡️'],
+      [withRecruitRole('rank:officer', recruitRoleId), 'OFFICER / STAFF', '⭐'],
+    ], 2),
+  });
 }
 
 function pretty(value) {
@@ -331,7 +371,7 @@ function pretty(value) {
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function completeEmbed(session) {
+function completePanel(session, recruitRoleAssigned) {
   const lines = [
     `**Path:** ${PATH_LABELS[session.path] || pretty(session.path)}`,
     `**Region:** ${pretty(session.region)}`,
@@ -344,26 +384,44 @@ function completeEmbed(session) {
   if (session.path === 'ambassador' || session.path === 'returning') {
     lines.push(`**Rules accepted:** ${session.rulesAccepted ? 'Yes' : 'No'}`);
   }
-  return cardEmbed('complete.png', lines.join('\n'));
+
+  const statusText = recruitRoleAssigned
+    ? 'You have been assigned the Recruit role. Welcome to the 1st Mobile Infantry.'
+    : 'Your onboarding is complete, but the bot could not assign the configured Recruit role. Please contact leadership.';
+
+  return buildPanel({
+    step: 'ONBOARDING COMPLETE',
+    title: '✅ ONBOARDING COMPLETE',
+    description: 'Thank you for completing the onboarding process.',
+    body: `### STATUS: RECRUIT\n${statusText}\n\n${lines.join('\n')}`,
+    rows: [],
+    accent: recruitRoleAssigned ? COLORS.green : COLORS.gold,
+    footer: null,
+  });
 }
 
-function restartComponents() {
-  return stackedButtons([
-    ['reset:start', 'START OVER', '🔄'],
-  ]);
+function pausedPanel(recruitRoleId) {
+  return buildPanel({
+    step: 'ONBOARDING PAUSED',
+    title: 'RULES NOT ACCEPTED',
+    description: 'You must accept the 1st M.I. Rules & Conduct before you can continue onboarding.',
+    body: 'If you are ready to continue, select **I AGREE** below.',
+    rows: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(withRecruitRole('rules:agree', recruitRoleId))
+          .setLabel('I AGREE')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success)
+      ),
+    ],
+    accent: COLORS.red,
+  });
 }
 
-function pausedEmbed() {
-  return cardEmbed('paused.png');
-}
-
-function currentCardName(embed) {
-  return embed?.data?.image?.url?.replace('attachment://', '') || 'step1.png';
-}
-
-function previousNameModal() {
+function previousNameModal(recruitRoleId) {
   return new ModalBuilder()
-    .setCustomId('modal:previousName')
+    .setCustomId(withRecruitRole('modal:previousName', recruitRoleId))
     .setTitle('Previous 1st M.I. name')
     .addComponents(
       new ActionRowBuilder().addComponents(
@@ -378,9 +436,9 @@ function previousNameModal() {
     );
 }
 
-function communityModal() {
+function communityModal(recruitRoleId) {
   return new ModalBuilder()
-    .setCustomId('modal:community')
+    .setCustomId(withRecruitRole('modal:community', recruitRoleId))
     .setTitle('Community / unit name')
     .addComponents(
       new ActionRowBuilder().addComponents(
@@ -395,38 +453,50 @@ function communityModal() {
     );
 }
 
-async function presentOnboarding(interaction, embed, components = []) {
-  const payload = panelPayload(embed, components);
-  const ephemeralV2 = V2_FLAGS | MessageFlags.Ephemeral;
+function v2Payload(container, ephemeral = false) {
+  return {
+    components: [container],
+    files: [logoAttachment()],
+    flags: MessageFlags.IsComponentsV2 | (ephemeral ? MessageFlags.Ephemeral : 0),
+  };
+}
+
+async function presentOnboarding(interaction, container) {
   const isEphemeral = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
 
   if (interaction.isModalSubmit()) {
     try {
-      await interaction.update(payload);
+      await interaction.update(v2Payload(container, false));
       return;
     } catch {
-      await interaction.reply({ ...payload, flags: ephemeralV2 });
+      await interaction.reply(v2Payload(container, true));
       return;
     }
   }
 
   if (interaction.isButton() && isEphemeral) {
-    await interaction.update(payload);
+    await interaction.update(v2Payload(container, false));
     return;
   }
 
   if (interaction.isButton()) {
-    await interaction.reply({ ...payload, flags: ephemeralV2 });
+    await interaction.reply(v2Payload(container, true));
     return;
   }
 
-  await interaction.reply(payload);
+  await interaction.reply(v2Payload(container, false));
 }
 
 const commands = [
   new SlashCommandBuilder()
     .setName('onboarding-panel')
-    .setDescription('Post the 1st M.I. onboarding test panel')
+    .setDescription('Post the 1st M.I. onboarding panel')
+    .addRoleOption(option =>
+      option
+        .setName('recruit-role')
+        .setDescription('Role members receive after completing onboarding')
+        .setRequired(true)
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
     .setName('reset-onboarding')
@@ -441,7 +511,7 @@ async function registerCommands(applicationId) {
 
 client.once(Events.ClientReady, async readyClient => {
   console.log(`Logged in as ${readyClient.user.tag}`);
-  console.log(`Target test server: ${guildId}`);
+  console.log(`Target server: ${guildId}`);
 
   const guild = readyClient.guilds.cache.get(guildId);
   if (!guild) {
@@ -465,7 +535,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.guildId && interaction.guildId !== guildId) {
       if (interaction.isRepliable()) {
         await interaction.reply({
-          content: 'This test bot is locked to the personal test server.',
+          content: 'This test bot is locked to the configured server.',
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -474,33 +544,54 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'onboarding-panel') {
-        await interaction.reply(panelPayload(welcomeEmbed(), welcomeComponents()));
+        const recruitRole = interaction.options.getRole('recruit-role', true);
+
+        if (recruitRole.managed) {
+          await interaction.reply({
+            content: 'That role is managed by Discord/integration and cannot be assigned by the bot. Please choose your normal Recruit role.',
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const botMember = interaction.guild?.members?.me;
+        if (botMember && recruitRole.position >= botMember.roles.highest.position) {
+          await interaction.reply({
+            content: `I cannot assign ${recruitRole} because it is at or above my highest role. Move the bot role above the Recruit role, then post the panel again.`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        await interaction.reply(v2Payload(welcomePanel(recruitRole.id), false));
         return;
       }
 
       if (interaction.commandName === 'reset-onboarding') {
         sessions.delete(interaction.user.id);
         await interaction.reply({
-          content: 'Your test onboarding session has been reset.',
+          content: 'Your onboarding session has been reset.',
           flags: MessageFlags.Ephemeral,
         });
-        return;
       }
+      return;
     }
 
     if (interaction.isModalSubmit()) {
       const session = getSession(interaction.user.id);
-      const [, kind] = interaction.customId.split(':');
+      const [, kind, interactionRoleId] = interaction.customId.split(':');
+      resolveRecruitRoleId(session, interactionRoleId);
 
       if (kind === 'previousName') {
         session.previousName = interaction.fields.getTextInputValue('previousName').trim();
-        await presentOnboarding(interaction, rankEmbed(), rankComponents());
+        await presentOnboarding(interaction, rankPanel(session.recruitRoleId));
         return;
       }
 
       if (kind === 'community') {
         session.community = interaction.fields.getTextInputValue('community').trim();
-        await presentOnboarding(interaction, completeEmbed(session), restartComponents());
+        const assigned = await awardRecruitRole(interaction.member, session);
+        await presentOnboarding(interaction, completePanel(session, assigned));
         return;
       }
     }
@@ -509,29 +600,25 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const member = interaction.member;
     const session = getSession(interaction.user.id);
-    const [group, value] = interaction.customId.split(':');
-
-    if (group === 'reset') {
-      sessions.delete(interaction.user.id);
-      await presentOnboarding(interaction, welcomeEmbed(), welcomeComponents());
-      return;
-    }
+    const [group, value, interactionRoleId] = interaction.customId.split(':');
+    resolveRecruitRoleId(session, interactionRoleId);
 
     if (group === 'open') {
       if (value === 'previousName') {
-        await interaction.showModal(previousNameModal());
+        await interaction.showModal(previousNameModal(session.recruitRoleId));
         return;
       }
       if (value === 'community') {
-        await interaction.showModal(communityModal());
+        await interaction.showModal(communityModal(session.recruitRoleId));
         return;
       }
     }
 
     if (group === 'path') {
-      Object.assign(session, emptySession(), { path: value });
+      const recruitRoleId = session.recruitRoleId;
+      Object.assign(session, emptySession(), { path: value, recruitRoleId });
       await replaceCategoryRole(member, config.roles?.paths, value);
-      await presentOnboarding(interaction, regionEmbed(), regionComponents());
+      await presentOnboarding(interaction, regionPanel(session.recruitRoleId));
       return;
     }
 
@@ -540,9 +627,9 @@ client.on(Events.InteractionCreate, async interaction => {
       await replaceCategoryRole(member, config.roles?.regions, value);
 
       if (session.path === 'starship' || session.path === 'hllv') {
-        await presentOnboarding(interaction, platformEmbed(), platformComponents());
+        await presentOnboarding(interaction, platformPanel(session.recruitRoleId));
       } else if (session.path === 'ambassador' || session.path === 'returning') {
-        await presentOnboarding(interaction, rulesEmbed(session), rulesComponents());
+        await presentOnboarding(interaction, rulesPanel(session, session.recruitRoleId));
       } else {
         await interaction.reply({
           content: 'Please restart onboarding and choose a path first.',
@@ -555,21 +642,23 @@ client.on(Events.InteractionCreate, async interaction => {
     if (group === 'platform') {
       session.platform = value;
       await replaceCategoryRole(member, config.roles?.platforms, value);
-      await presentOnboarding(interaction, experienceEmbed(), experienceComponents());
+      await presentOnboarding(interaction, experiencePanel(session.recruitRoleId));
       return;
     }
 
     if (group === 'experience') {
       session.experience = value;
       await replaceCategoryRole(member, config.roles?.experience, value);
-      await presentOnboarding(interaction, completeEmbed(session), restartComponents());
+      const assigned = await awardRecruitRole(interaction.member, session);
+      await presentOnboarding(interaction, completePanel(session, assigned));
       return;
     }
 
     if (group === 'rank') {
       session.previousRank = value;
       await replaceCategoryRole(member, config.roles?.ranks, value);
-      await presentOnboarding(interaction, completeEmbed(session), restartComponents());
+      const assigned = await awardRecruitRole(interaction.member, session);
+      await presentOnboarding(interaction, completePanel(session, assigned));
       return;
     }
 
@@ -577,28 +666,23 @@ client.on(Events.InteractionCreate, async interaction => {
       if (value === 'agree') {
         session.rulesAccepted = true;
         if (session.path === 'returning') {
-          await presentOnboarding(interaction, previousNameEmbed(), previousNameComponents());
+          await presentOnboarding(interaction, previousNamePanel(session.recruitRoleId));
         } else {
-          await presentOnboarding(interaction, communityEmbed(), communityComponents());
+          await presentOnboarding(interaction, communityPanel(session.recruitRoleId));
         }
       } else {
         session.rulesAccepted = false;
-        await presentOnboarding(
-          interaction,
-          pausedEmbed(),
-          [
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('rules:agree').setLabel('I AGREE').setEmoji('✅').setStyle(ButtonStyle.Success)
-            ),
-          ]
-        );
+        await presentOnboarding(interaction, pausedPanel(session.recruitRoleId));
       }
+      return;
     }
   } catch (err) {
     console.error(err);
     if (interaction.isRepliable()) {
-      const msg = 'Something went wrong while processing that onboarding step. Check the bot console for details.';
-      const payload = { content: msg, flags: MessageFlags.Ephemeral };
+      const payload = {
+        content: 'Something went wrong while processing that onboarding step. Check the bot console for details.',
+        flags: MessageFlags.Ephemeral,
+      };
       if (interaction.deferred || interaction.replied) {
         await interaction.followUp(payload).catch(() => {});
       } else {

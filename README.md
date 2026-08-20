@@ -1,41 +1,20 @@
-# 1st Mobile Infantry Onboarding Bot — Personal Test Server
+# 1st Mobile Infantry Onboarding Bot — Discord Components V2
 
-Locked to Discord server `1352675653798989947` by default.
+This build replaces the old PNG-card/fake-button presentation with **native Discord Components V2**.
 
-## Changes in this build
+## What changed
 
-- Step 1 uses a clean **2 × 2** real Discord button layout.
-- Step 2 region choices use compact real Discord buttons.
-- Step 3 branches correctly:
-  - Starship Troopers / Hell Let Loose: Vietnam → Platform.
-  - Ambassador / Returning Member → Rules & Conduct.
-- All existing path, region, platform, experience and returning-rank role assignment remains supported.
-- When `/onboarding-panel` is posted, the command now asks you to choose the **Recruit role**.
-- Every member who reaches the end of onboarding is automatically given that Recruit role.
-- The final completion card now displays **STATUS: RECRUIT** instead of the privacy message.
-- The final screen has **no Start Over button**.
-- `/reset-onboarding` is still available for testing/admin use, but it is not shown to members at completion.
+- The onboarding interface is now rendered by Discord itself using a native Components V2 **Container**.
+- The 1st M.I. logo appears as the native section thumbnail.
+- Questions and descriptions are native Discord text, so they scale properly on desktop and mobile.
+- Every visible choice is a real Discord button.
+- The public Step 1 panel stays available for new members.
+- After a member selects a path, the rest of their onboarding is private/ephemeral.
+- Step 1 → Step 2 → branching Step 3 behaviour is preserved.
+- The Recruit role is selected when `/onboarding-panel` is posted and is awarded when onboarding is complete.
+- The final screen says **STATUS: RECRUIT** and contains no Start Over button.
 
-## Posting the onboarding panel
-
-Run:
-
-```text
-/onboarding-panel recruit-role:@Recruit
-```
-
-Discord will give you a role picker for `recruit-role`, so you do not need to hard-code the final Recruit role before posting the panel.
-
-The bot checks that:
-
-- the selected role is not a Discord/integration-managed role; and
-- the bot's highest role is above the selected Recruit role.
-
-The chosen Recruit role ID is carried through the onboarding controls so members can receive the correct role when they finish.
-
-`config.json` also contains an optional `roles.recruit` fallback value, but the role selected when posting the panel is the normal method.
-
-## Current flow
+## Flow
 
 ### Step 1 — What are you here for?
 
@@ -44,7 +23,7 @@ The chosen Recruit role ID is carried through the onboarding controls so members
 - Ambassador
 - Returning Member
 
-Selecting an option can assign the matching `roles.paths` role.
+The selected path role can be assigned automatically through `config.json`.
 
 ### Step 2 — Region
 
@@ -54,8 +33,6 @@ Selecting an option can assign the matching `roles.paths` role.
 - Africa
 - Oceania
 
-Selecting an option can assign the matching `roles.regions` role.
-
 ### Step 3
 
 **Starship Troopers / Hell Let Loose: Vietnam**
@@ -63,8 +40,6 @@ Selecting an option can assign the matching `roles.regions` role.
 - PC
 - Xbox
 - PlayStation
-
-The bot can assign the matching `roles.platforms` role.
 
 **Ambassador / Returning Member**
 
@@ -75,32 +50,33 @@ The bot can assign the matching `roles.platforms` role.
 
 **Starship Troopers / Hell Let Loose: Vietnam**
 
-- New Recruit
-- Some Experience
-- Veteran
-- Expert
+- Experience selection
+- Completion → Recruit role
 
 **Ambassador**
 
-- Community / unit name modal
+- Community / Unit Name modal
+- Completion → Recruit role
 
 **Returning Member**
 
 - Previous 1st M.I. name modal
 - Previous rank / role
+- Completion → Recruit role
 
-### Completion
+## Post the onboarding panel
 
-After the final answer:
+Run:
 
-1. the configured/selected roles from onboarding remain applied;
-2. the Recruit role chosen when the panel was posted is added;
-3. the completion card is shown with **STATUS: RECRUIT**; and
-4. there is no **Start Over** button.
+```text
+/onboarding-panel recruit-role:@Recruit
+```
 
-## Custom Starship Troopers / HLL button emblems
+The bot verifies that it can assign the selected Recruit role before posting the panel.
 
-Discord buttons cannot use PNG/JPG/WebP files directly. Upload the supplied emblems to Discord as custom server emojis, then place their numeric IDs into `config.json`:
+## Custom game emblems on buttons
+
+Discord native buttons can use custom server emojis. Upload the supplied Starship Troopers and Hell Let Loose emblems as emojis, then place their numeric emoji IDs into `config.json`:
 
 ```json
 "emojis": {
@@ -114,64 +90,90 @@ Discord buttons cannot use PNG/JPG/WebP files directly. Upload the supplied embl
 }
 ```
 
-Blank values safely fall back to normal Unicode icons.
+If left blank, normal Unicode icons are used.
+
+## Role configuration
+
+All category role IDs are optional. Empty IDs are ignored.
+
+```json
+"roles": {
+  "recruit": "",
+  "paths": {
+    "starship": "",
+    "hllv": "",
+    "ambassador": "",
+    "returning": ""
+  },
+  "regions": {
+    "america": "",
+    "europe": "",
+    "asia": "",
+    "africa": "",
+    "oceania": ""
+  },
+  "platforms": {
+    "pc": "",
+    "xbox": "",
+    "playstation": ""
+  },
+  "experience": {
+    "new": "",
+    "some": "",
+    "veteran": "",
+    "expert": ""
+  },
+  "ranks": {
+    "squad_member": "",
+    "squad_lead": "",
+    "platoon_lead": "",
+    "nco": "",
+    "officer": ""
+  }
+}
+```
+
+The bot removes other configured roles in the same category before adding a newly selected role.
 
 ## Setup
 
 1. Install Node.js 20 or newer.
-2. Create a Discord application/bot in the Discord Developer Portal.
-3. Enable **Server Members Intent**.
-4. Invite the bot with:
+2. Create a Discord application/bot.
+3. Enable **Server Members Intent** in the Discord Developer Portal.
+4. Give the bot:
    - View Channels
    - Send Messages
-   - Embed Links
-   - Attach Files
    - Read Message History
    - Manage Roles
    - Use Application Commands
-5. Put the bot's Discord role above all roles it should assign, including Recruit.
-6. Create a `.env` file and set:
+5. Put the bot role above every role it needs to assign.
+6. Create a `.env` file:
 
 ```text
 DISCORD_TOKEN=your_bot_token
 ```
 
-7. Put any path/region/platform/etc. role IDs into `config.json`.
-8. Optional: upload custom emblems as Discord server emojis and put their IDs in `config.json`.
-9. Run:
+7. Set your server ID and optional role IDs in `config.json`.
+8. Run:
 
 ```bash
 npm install
 npm start
 ```
 
-10. Post the panel with:
-
-```text
-/onboarding-panel recruit-role:@Recruit
-```
-
-The public panel remains on Step 1. After someone clicks a path, their remaining onboarding flow is ephemeral/private so one recruit cannot overwrite another person's onboarding screen.
-
-## Role configuration
-
-Empty category role IDs are ignored, so the flow can be tested before every role is configured.
-
-The bot removes other configured roles in the same category before adding the newly selected category role.
-
 ## Railway
 
-Place these files at the root of the Railway service/repository and use:
+Use these environment variables:
+
+```text
+DISCORD_TOKEN=your_bot_token
+GUILD_ID=your_server_id
+```
+
+Start command:
 
 ```text
 node index.js
 ```
 
-Environment variables:
-
-```text
-DISCORD_TOKEN=your_bot_token
-GUILD_ID=1352675653798989947
-```
-
-This bot is a worker and does not require a public HTTP port.
+This is a worker bot and does not require a public HTTP port.
