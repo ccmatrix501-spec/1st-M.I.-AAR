@@ -131,7 +131,8 @@ function cardEmbed(name, extraDescription) {
   if (hasCard(name)) {
     const embed = new EmbedBuilder()
       .setColor(COLORS.dark)
-      .setImage(`attachment://${name}`);
+      .setImage(`attachment://${name}`)
+      .setFooter({ text: 'Your answers are private and will only be seen by leadership staff.' });
     if (extraDescription) embed.setDescription(extraDescription);
     return embed;
   }
@@ -185,16 +186,36 @@ async function replaceCategoryRole(member, roleMap, selectedKey) {
   }
 }
 
-function stackedButtons(items) {
-  return items.map(([id, label, emoji, style]) =>
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
+function configuredEmoji(key, fallback) {
+  const value = config.emojis?.[key];
+  if (!value) return fallback;
+
+  // Allow either a normal/custom emoji string or just a Discord custom emoji ID.
+  if (/^\d+$/.test(String(value))) {
+    return { id: String(value), name: key };
+  }
+
+  return value;
+}
+
+function buttonRows(items, perRow = 2) {
+  const rows = [];
+
+  for (let i = 0; i < items.length; i += perRow) {
+    const row = new ActionRowBuilder();
+    for (const [id, label, emoji, style] of items.slice(i, i + perRow)) {
+      const button = new ButtonBuilder()
         .setCustomId(id)
         .setLabel(label)
-        .setEmoji(emoji)
-        .setStyle(style || ButtonStyle.Secondary)
-    )
-  );
+        .setStyle(style || ButtonStyle.Secondary);
+
+      if (emoji) button.setEmoji(emoji);
+      row.addComponents(button);
+    }
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 function welcomeEmbed() {
@@ -202,12 +223,12 @@ function welcomeEmbed() {
 }
 
 function welcomeComponents() {
-  return stackedButtons([
-    ['path:starship', 'STARSHIP TROOPERS', '🪖'],
-    ['path:hllv', 'HELL LET LOOSE: VIETNAM', '⚔️'],
-    ['path:ambassador', 'AMBASSADOR', '🤝'],
-    ['path:returning', 'RETURNING MEMBER', '🛡️'],
-  ]);
+  return buttonRows([
+    ['path:starship', 'STARSHIP TROOPERS', configuredEmoji('starship', '🪖')],
+    ['path:hllv', 'HELL LET LOOSE: VIETNAM', configuredEmoji('hllv', '⚔️')],
+    ['path:ambassador', 'AMBASSADOR', configuredEmoji('ambassador', '🤝')],
+    ['path:returning', 'RETURNING MEMBER', configuredEmoji('returning', '↩️')],
+  ], 2);
 }
 
 function regionEmbed() {
@@ -215,13 +236,13 @@ function regionEmbed() {
 }
 
 function regionComponents() {
-  return stackedButtons([
+  return buttonRows([
     ['region:america', 'AMERICA', '🌎'],
     ['region:europe', 'EUROPE', '🌍'],
     ['region:asia', 'ASIA', '🌏'],
     ['region:africa', 'AFRICA', '🌍'],
     ['region:oceania', 'OCEANIA', '🇦🇺'],
-  ]);
+  ], 3);
 }
 
 function platformEmbed() {
@@ -229,11 +250,11 @@ function platformEmbed() {
 }
 
 function platformComponents() {
-  return stackedButtons([
-    ['platform:pc', 'PC', '🖥️'],
-    ['platform:xbox', 'XBOX', '🎮'],
-    ['platform:playstation', 'PLAYSTATION', '🕹️'],
-  ]);
+  return buttonRows([
+    ['platform:pc', 'PC', configuredEmoji('pc', '🖥️')],
+    ['platform:xbox', 'XBOX', configuredEmoji('xbox', '🎮')],
+    ['platform:playstation', 'PLAYSTATION', configuredEmoji('playstation', '🎮')],
+  ], 3);
 }
 
 function rulesEmbed(session) {
@@ -254,12 +275,12 @@ function experienceEmbed() {
 }
 
 function experienceComponents() {
-  return stackedButtons([
+  return buttonRows([
     ['experience:new', 'NEW RECRUIT', '🪖'],
     ['experience:some', 'SOME EXPERIENCE', '🔺'],
     ['experience:veteran', 'VETERAN', '🎖️'],
     ['experience:expert', 'EXPERT', '⭐'],
-  ]);
+  ], 2);
 }
 
 function previousNameEmbed() {
@@ -267,9 +288,9 @@ function previousNameEmbed() {
 }
 
 function previousNameComponents() {
-  return stackedButtons([
+  return buttonRows([
     ['open:previousName', 'ENTER YOUR PREVIOUS NAME', '📝'],
-  ]);
+  ], 1);
 }
 
 function communityEmbed() {
@@ -277,9 +298,9 @@ function communityEmbed() {
 }
 
 function communityComponents() {
-  return stackedButtons([
+  return buttonRows([
     ['open:community', 'ENTER COMMUNITY / UNIT NAME', '📝'],
-  ]);
+  ], 1);
 }
 
 function rankEmbed() {
@@ -287,13 +308,13 @@ function rankEmbed() {
 }
 
 function rankComponents() {
-  return stackedButtons([
+  return buttonRows([
     ['rank:squad_member', 'SQUAD MEMBER', '🪖'],
     ['rank:squad_lead', 'SQUAD LEAD', '🔺'],
     ['rank:platoon_lead', 'PLATOON LEAD', '🎖️'],
     ['rank:nco', 'NCO', '🛡️'],
     ['rank:officer', 'OFFICER / STAFF', '⭐'],
-  ]);
+  ], 2);
 }
 
 function pretty(value) {
@@ -318,9 +339,9 @@ function completeEmbed(session) {
 }
 
 function restartComponents() {
-  return stackedButtons([
+  return buttonRows([
     ['reset:start', 'START OVER', '🔄'],
-  ]);
+  ], 1);
 }
 
 function pausedEmbed() {

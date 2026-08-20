@@ -1,21 +1,44 @@
 # 1st Mobile Infantry Onboarding Bot — Personal Test Server
 
-Locked to Discord server `1352675653798989947`.
+Locked to Discord server `1352675653798989947` by default.
 
-This is the test onboarding flow, modified so it can run in your personal test server without extra client-ID setup.
+## UI fix in this build
 
-## What changed for this server
+The onboarding mockups originally contained button-looking rows **inside the PNG** and Discord then rendered the real buttons underneath. That made the interface look duplicated and much taller than intended.
 
-- Guild ID is pre-filled as `1352675653798989947` in `.env.example` and `config.json`.
-- Slash commands register to that guild only after login. `CLIENT_ID` is no longer required.
-- The public `/onboarding-panel` stays on Step 1. Each recruit’s flow continues in an ephemeral message so testers do not overwrite each other.
-- The bot refuses interactions from any other guild.
-- If the bot is not in the test server, the console prints an invite URL.
-- `config.json` is included so the bot can start after you add a token. Empty role IDs are ignored.
+This build fixes that by:
+
+- turning the PNGs into clean branded header/content cards;
+- using only real Discord controls for selections;
+- displaying Step 1 as a **2 × 2** button layout;
+- displaying Region in compact rows;
+- displaying PC / Xbox / PlayStation on one row;
+- displaying experience and returning-rank choices in compact rows;
+- keeping Rules / Agree / Decline as real buttons;
+- keeping the privacy notice in the Discord embed footer;
+- preserving the existing role-assignment and branching logic.
+
+### Custom Starship Troopers / HLL button emblems
+
+Discord buttons cannot use a PNG/JPG/WebP file directly as their icon. The image must first be uploaded to Discord as a **custom server emoji**.
+
+After uploading the two supplied emblems as server emojis, copy each emoji's numeric ID into `config.json`. This build accepts the numeric ID directly:
+
+```json
+"emojis": {
+  "starship": "YOUR_STARSHIP_EMOJI_ID",
+  "hllv": "YOUR_HLL_EMOJI_ID",
+  "ambassador": "",
+  "returning": "",
+  "pc": "",
+  "xbox": "",
+  "playstation": ""
+}
+```
+
+If an emoji ID is blank, the bot safely falls back to a normal Unicode icon.
 
 ## Current flow
-
-Copy and step titles now follow the mockup. Discord still uses native buttons under the embed, not clickable rows inside an image.
 
 ### Step 1 — What are you here for?
 - Starship Troopers
@@ -23,27 +46,51 @@ Copy and step titles now follow the mockup. Discord still uses native buttons un
 - Ambassador
 - Returning Member
 
+Selecting an option can assign the matching `roles.paths` role.
+
 ### Step 2 — Region
-- America / Europe / Asia / Africa / Oceania
+- America
+- Europe
+- Asia
+- Africa
+- Oceania
+
+Selecting an option can assign the matching `roles.regions` role.
 
 ### Step 3
-**Starship Troopers / Hell Let Loose: Vietnam** — PC / Xbox / PlayStation
 
-**Ambassador / Returning Member** — Rules & Conduct, then I Agree / I Do Not Agree
+**Starship Troopers / Hell Let Loose: Vietnam**
+- PC
+- Xbox
+- PlayStation
+
+The bot can assign the matching `roles.platforms` role.
+
+**Ambassador / Returning Member**
+- Rules & Conduct
+- I Agree / I Do Not Agree
 
 ### Step 4
-**Games** — New Recruit / Some Experience / Veteran / Expert
 
-**Ambassador** — community / unit name (modal)
+**Starship Troopers / Hell Let Loose: Vietnam**
+- New Recruit
+- Some Experience
+- Veteran
+- Expert
 
-**Returning Member** — previous 1st M.I. name (modal), then previous rank
+**Ambassador**
+- Community / unit name modal
+
+**Returning Member**
+- Previous 1st M.I. name modal
+- Previous rank / role
 
 ## Setup
 
 1. Install Node.js 20 or newer.
 2. Create a Discord application/bot in the Discord Developer Portal.
 3. Enable **Server Members Intent**.
-4. Invite the bot to server `1352675653798989947` with:
+4. Invite the bot with:
    - View Channels
    - Send Messages
    - Embed Links
@@ -51,53 +98,49 @@ Copy and step titles now follow the mockup. Discord still uses native buttons un
    - Read Message History
    - Manage Roles
    - Use Application Commands
-5. Put the bot’s role above any roles it should assign.
-6. Copy `.env.example` to `.env` and set `DISCORD_TOKEN`.
-7. Optional: put role IDs into `config.json`.
-8. In this folder:
+5. Put the bot's Discord role above any roles it should assign.
+6. Create a `.env` file and set:
+
+```text
+DISCORD_TOKEN=your_bot_token
+```
+
+7. Put your role IDs into `config.json`.
+8. Optional: upload your custom emblems as Discord server emojis and put their IDs in `config.json`.
+9. Run:
 
 ```bash
 npm install
 npm start
 ```
 
-On Windows you can also double-click `start-windows.bat`.
-
-9. In the test server run:
+10. In the server, run:
 
 ```text
 /onboarding-panel
 ```
 
-## Notes
+The public panel remains on Step 1. After a member clicks a path, their remaining onboarding flow is ephemeral/private so one recruit does not overwrite another recruit's screen.
 
-- Empty role IDs are safely ignored, so you can test the UI before creating roles.
-- The bot removes the previous role in the same category before assigning a new one.
-- Onboarding state is kept in memory. Restarting the bot resets active test sessions.
-- Button presses only affect the person who pressed them.
+## Role configuration
 
-## Railway deploy
+Empty role IDs are ignored, so the interface can be tested before roles are configured.
 
-The crash `Cannot find module '/app/index.js'` happens when Railway starts `node index.js` from the wrong folder, or the zip has an extra nested folder.
+The bot removes other configured roles in the same category before adding the newly selected role.
 
-Use the railway zip in this package: files must sit at the **repo/service root**, not inside `1st-mi-onboarding-bot/`.
+## Railway
 
-1. In Railway, create a new service from the GitHub repo or upload this folder.
-2. If the repo has this bot in a subfolder, set **Root Directory** to that folder.
-3. Set start command to:
+Place these files at the root of the Railway service/repository, then use:
 
 ```text
 node index.js
 ```
 
-4. Add these variables:
+Environment variables:
 
 ```text
 DISCORD_TOKEN=your_bot_token
 GUILD_ID=1352675653798989947
 ```
 
-5. Enable **Server Members Intent** on the Discord application.
-6. Redeploy. The logs should show `Logged in as ...` then `Registered slash commands for guild 1352675653798989947`.
-
-This is a Discord worker, not a website. You do not need a public HTTP port.
+This bot is a worker and does not require a public HTTP port.
