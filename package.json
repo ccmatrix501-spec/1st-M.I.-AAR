@@ -1,6 +1,6 @@
 {
   "name": "1st-mi-onboarding-bot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Test onboarding flow for the 1st Mobile Infantry Discord server",
   "main": "index.js",

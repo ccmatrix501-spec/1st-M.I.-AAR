@@ -2,27 +2,105 @@
 
 Locked to Discord server `1352675653798989947` by default.
 
-## UI fix in this build
+## Changes in this build
 
-The onboarding mockups originally contained button-looking rows **inside the PNG** and Discord then rendered the real buttons underneath. That made the interface look duplicated and much taller than intended.
+- Step 1 uses a clean **2 × 2** real Discord button layout.
+- Step 2 region choices use compact real Discord buttons.
+- Step 3 branches correctly:
+  - Starship Troopers / Hell Let Loose: Vietnam → Platform.
+  - Ambassador / Returning Member → Rules & Conduct.
+- All existing path, region, platform, experience and returning-rank role assignment remains supported.
+- When `/onboarding-panel` is posted, the command now asks you to choose the **Recruit role**.
+- Every member who reaches the end of onboarding is automatically given that Recruit role.
+- The final completion card now displays **STATUS: RECRUIT** instead of the privacy message.
+- The final screen has **no Start Over button**.
+- `/reset-onboarding` is still available for testing/admin use, but it is not shown to members at completion.
 
-This build fixes that by:
+## Posting the onboarding panel
 
-- turning the PNGs into clean branded header/content cards;
-- using only real Discord controls for selections;
-- displaying Step 1 as a **2 × 2** button layout;
-- displaying Region in compact rows;
-- displaying PC / Xbox / PlayStation on one row;
-- displaying experience and returning-rank choices in compact rows;
-- keeping Rules / Agree / Decline as real buttons;
-- keeping the privacy notice in the Discord embed footer;
-- preserving the existing role-assignment and branching logic.
+Run:
 
-### Custom Starship Troopers / HLL button emblems
+```text
+/onboarding-panel recruit-role:@Recruit
+```
 
-Discord buttons cannot use a PNG/JPG/WebP file directly as their icon. The image must first be uploaded to Discord as a **custom server emoji**.
+Discord will give you a role picker for `recruit-role`, so you do not need to hard-code the final Recruit role before posting the panel.
 
-After uploading the two supplied emblems as server emojis, copy each emoji's numeric ID into `config.json`. This build accepts the numeric ID directly:
+The bot checks that:
+
+- the selected role is not a Discord/integration-managed role; and
+- the bot's highest role is above the selected Recruit role.
+
+The chosen Recruit role ID is carried through the onboarding controls so members can receive the correct role when they finish.
+
+`config.json` also contains an optional `roles.recruit` fallback value, but the role selected when posting the panel is the normal method.
+
+## Current flow
+
+### Step 1 — What are you here for?
+
+- Starship Troopers
+- Hell Let Loose: Vietnam
+- Ambassador
+- Returning Member
+
+Selecting an option can assign the matching `roles.paths` role.
+
+### Step 2 — Region
+
+- America
+- Europe
+- Asia
+- Africa
+- Oceania
+
+Selecting an option can assign the matching `roles.regions` role.
+
+### Step 3
+
+**Starship Troopers / Hell Let Loose: Vietnam**
+
+- PC
+- Xbox
+- PlayStation
+
+The bot can assign the matching `roles.platforms` role.
+
+**Ambassador / Returning Member**
+
+- Rules & Conduct
+- I Agree / I Do Not Agree
+
+### Step 4+
+
+**Starship Troopers / Hell Let Loose: Vietnam**
+
+- New Recruit
+- Some Experience
+- Veteran
+- Expert
+
+**Ambassador**
+
+- Community / unit name modal
+
+**Returning Member**
+
+- Previous 1st M.I. name modal
+- Previous rank / role
+
+### Completion
+
+After the final answer:
+
+1. the configured/selected roles from onboarding remain applied;
+2. the Recruit role chosen when the panel was posted is added;
+3. the completion card is shown with **STATUS: RECRUIT**; and
+4. there is no **Start Over** button.
+
+## Custom Starship Troopers / HLL button emblems
+
+Discord buttons cannot use PNG/JPG/WebP files directly. Upload the supplied emblems to Discord as custom server emojis, then place their numeric IDs into `config.json`:
 
 ```json
 "emojis": {
@@ -36,54 +114,7 @@ After uploading the two supplied emblems as server emojis, copy each emoji's num
 }
 ```
 
-If an emoji ID is blank, the bot safely falls back to a normal Unicode icon.
-
-## Current flow
-
-### Step 1 — What are you here for?
-- Starship Troopers
-- Hell Let Loose: Vietnam
-- Ambassador
-- Returning Member
-
-Selecting an option can assign the matching `roles.paths` role.
-
-### Step 2 — Region
-- America
-- Europe
-- Asia
-- Africa
-- Oceania
-
-Selecting an option can assign the matching `roles.regions` role.
-
-### Step 3
-
-**Starship Troopers / Hell Let Loose: Vietnam**
-- PC
-- Xbox
-- PlayStation
-
-The bot can assign the matching `roles.platforms` role.
-
-**Ambassador / Returning Member**
-- Rules & Conduct
-- I Agree / I Do Not Agree
-
-### Step 4
-
-**Starship Troopers / Hell Let Loose: Vietnam**
-- New Recruit
-- Some Experience
-- Veteran
-- Expert
-
-**Ambassador**
-- Community / unit name modal
-
-**Returning Member**
-- Previous 1st M.I. name modal
-- Previous rank / role
+Blank values safely fall back to normal Unicode icons.
 
 ## Setup
 
@@ -98,15 +129,15 @@ The bot can assign the matching `roles.platforms` role.
    - Read Message History
    - Manage Roles
    - Use Application Commands
-5. Put the bot's Discord role above any roles it should assign.
+5. Put the bot's Discord role above all roles it should assign, including Recruit.
 6. Create a `.env` file and set:
 
 ```text
 DISCORD_TOKEN=your_bot_token
 ```
 
-7. Put your role IDs into `config.json`.
-8. Optional: upload your custom emblems as Discord server emojis and put their IDs in `config.json`.
+7. Put any path/region/platform/etc. role IDs into `config.json`.
+8. Optional: upload custom emblems as Discord server emojis and put their IDs in `config.json`.
 9. Run:
 
 ```bash
@@ -114,23 +145,23 @@ npm install
 npm start
 ```
 
-10. In the server, run:
+10. Post the panel with:
 
 ```text
-/onboarding-panel
+/onboarding-panel recruit-role:@Recruit
 ```
 
-The public panel remains on Step 1. After a member clicks a path, their remaining onboarding flow is ephemeral/private so one recruit does not overwrite another recruit's screen.
+The public panel remains on Step 1. After someone clicks a path, their remaining onboarding flow is ephemeral/private so one recruit cannot overwrite another person's onboarding screen.
 
 ## Role configuration
 
-Empty role IDs are ignored, so the interface can be tested before roles are configured.
+Empty category role IDs are ignored, so the flow can be tested before every role is configured.
 
-The bot removes other configured roles in the same category before adding the newly selected role.
+The bot removes other configured roles in the same category before adding the newly selected category role.
 
 ## Railway
 
-Place these files at the root of the Railway service/repository, then use:
+Place these files at the root of the Railway service/repository and use:
 
 ```text
 node index.js

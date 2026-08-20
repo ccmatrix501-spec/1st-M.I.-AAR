@@ -8,18 +8,23 @@ const {
   ButtonBuilder,
   ButtonStyle,
   Client,
+  ContainerBuilder,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  MediaGalleryBuilder,
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
+  TextDisplayBuilder,
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
+
+const V2_FLAGS = MessageFlags.IsComponentsV2 ?? (1 << 15);
 
 const ROOT = path.resolve(__dirname, '..');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
@@ -131,8 +136,7 @@ function cardEmbed(name, extraDescription) {
   if (hasCard(name)) {
     const embed = new EmbedBuilder()
       .setColor(COLORS.dark)
-      .setImage(`attachment://${name}`)
-      .setFooter({ text: 'Your answers are private and will only be seen by leadership staff.' });
+      .setImage(`attachment://${name}`);
     if (extraDescription) embed.setDescription(extraDescription);
     return embed;
   }
@@ -186,36 +190,41 @@ async function replaceCategoryRole(member, roleMap, selectedKey) {
   }
 }
 
-function configuredEmoji(key, fallback) {
-  const value = config.emojis?.[key];
-  if (!value) return fallback;
-
-  // Allow either a normal/custom emoji string or just a Discord custom emoji ID.
-  if (/^\d+$/.test(String(value))) {
-    return { id: String(value), name: key };
-  }
-
-  return value;
-}
-
-function buttonRows(items, perRow = 2) {
-  const rows = [];
-
-  for (let i = 0; i < items.length; i += perRow) {
-    const row = new ActionRowBuilder();
-    for (const [id, label, emoji, style] of items.slice(i, i + perRow)) {
-      const button = new ButtonBuilder()
+function stackedButtons(items) {
+  return items.map(([id, label, emoji, style]) =>
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
         .setCustomId(id)
         .setLabel(label)
-        .setStyle(style || ButtonStyle.Secondary);
+        .setEmoji(emoji)
+        .setStyle(style || ButtonStyle.Secondary)
+    )
+  );
+}
 
-      if (emoji) button.setEmoji(emoji);
-      row.addComponents(button);
-    }
-    rows.push(row);
+function panelPayload(embed, components = []) {
+  const cardName = currentCardName(embed);
+  const fileName = hasCard(cardName) ? cardName : '1st-mi-logo.png';
+  const extra = embed?.data?.description || null;
+
+  const container = new ContainerBuilder().setAccentColor(COLORS.gold);
+  container.addMediaGalleryComponents(
+    new MediaGalleryBuilder().addItems(item => item.setURL(`attachment://${fileName}`).setDescription('1st M.I. onboarding'))
+  );
+  if (extra) {
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(extra));
+  }
+  for (const row of components) {
+    container.addActionRowComponents(row);
   }
 
-  return rows;
+  return {
+    content: null,
+    embeds: [],
+    components: [container],
+    files: [cardAttachment(cardName)],
+    flags: V2_FLAGS,
+  };
 }
 
 function welcomeEmbed() {
@@ -223,12 +232,12 @@ function welcomeEmbed() {
 }
 
 function welcomeComponents() {
-  return buttonRows([
-    ['path:starship', 'STARSHIP TROOPERS', configuredEmoji('starship', '🪖')],
-    ['path:hllv', 'HELL LET LOOSE: VIETNAM', configuredEmoji('hllv', '⚔️')],
-    ['path:ambassador', 'AMBASSADOR', configuredEmoji('ambassador', '🤝')],
-    ['path:returning', 'RETURNING MEMBER', configuredEmoji('returning', '↩️')],
-  ], 2);
+  return stackedButtons([
+    ['path:starship', 'STARSHIP TROOPERS', '🪖'],
+    ['path:hllv', 'HELL LET LOOSE: VIETNAM', '⚔️'],
+    ['path:ambassador', 'AMBASSADOR', '🤝'],
+    ['path:returning', 'RETURNING MEMBER', '🛡️'],
+  ]);
 }
 
 function regionEmbed() {
@@ -236,13 +245,13 @@ function regionEmbed() {
 }
 
 function regionComponents() {
-  return buttonRows([
+  return stackedButtons([
     ['region:america', 'AMERICA', '🌎'],
     ['region:europe', 'EUROPE', '🌍'],
     ['region:asia', 'ASIA', '🌏'],
     ['region:africa', 'AFRICA', '🌍'],
     ['region:oceania', 'OCEANIA', '🇦🇺'],
-  ], 3);
+  ]);
 }
 
 function platformEmbed() {
@@ -250,11 +259,11 @@ function platformEmbed() {
 }
 
 function platformComponents() {
-  return buttonRows([
-    ['platform:pc', 'PC', configuredEmoji('pc', '🖥️')],
-    ['platform:xbox', 'XBOX', configuredEmoji('xbox', '🎮')],
-    ['platform:playstation', 'PLAYSTATION', configuredEmoji('playstation', '🎮')],
-  ], 3);
+  return stackedButtons([
+    ['platform:pc', 'PC', '🖥️'],
+    ['platform:xbox', 'XBOX', '🎮'],
+    ['platform:playstation', 'PLAYSTATION', '🕹️'],
+  ]);
 }
 
 function rulesEmbed(session) {
@@ -275,12 +284,12 @@ function experienceEmbed() {
 }
 
 function experienceComponents() {
-  return buttonRows([
+  return stackedButtons([
     ['experience:new', 'NEW RECRUIT', '🪖'],
     ['experience:some', 'SOME EXPERIENCE', '🔺'],
     ['experience:veteran', 'VETERAN', '🎖️'],
     ['experience:expert', 'EXPERT', '⭐'],
-  ], 2);
+  ]);
 }
 
 function previousNameEmbed() {
@@ -288,9 +297,9 @@ function previousNameEmbed() {
 }
 
 function previousNameComponents() {
-  return buttonRows([
+  return stackedButtons([
     ['open:previousName', 'ENTER YOUR PREVIOUS NAME', '📝'],
-  ], 1);
+  ]);
 }
 
 function communityEmbed() {
@@ -298,9 +307,9 @@ function communityEmbed() {
 }
 
 function communityComponents() {
-  return buttonRows([
+  return stackedButtons([
     ['open:community', 'ENTER COMMUNITY / UNIT NAME', '📝'],
-  ], 1);
+  ]);
 }
 
 function rankEmbed() {
@@ -308,17 +317,17 @@ function rankEmbed() {
 }
 
 function rankComponents() {
-  return buttonRows([
+  return stackedButtons([
     ['rank:squad_member', 'SQUAD MEMBER', '🪖'],
     ['rank:squad_lead', 'SQUAD LEAD', '🔺'],
     ['rank:platoon_lead', 'PLATOON LEAD', '🎖️'],
     ['rank:nco', 'NCO', '🛡️'],
     ['rank:officer', 'OFFICER / STAFF', '⭐'],
-  ], 2);
+  ]);
 }
 
 function pretty(value) {
-  if (!value) return '\u2014';
+  if (!value) return '—';
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
@@ -339,9 +348,9 @@ function completeEmbed(session) {
 }
 
 function restartComponents() {
-  return buttonRows([
+  return stackedButtons([
     ['reset:start', 'START OVER', '🔄'],
-  ], 1);
+  ]);
 }
 
 function pausedEmbed() {
@@ -387,13 +396,8 @@ function communityModal() {
 }
 
 async function presentOnboarding(interaction, embed, components = []) {
-  const cardName = currentCardName(embed);
-  const payload = {
-    embeds: [embed],
-    components,
-    files: [cardAttachment(cardName)],
-  };
-
+  const payload = panelPayload(embed, components);
+  const ephemeralV2 = V2_FLAGS | MessageFlags.Ephemeral;
   const isEphemeral = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
 
   if (interaction.isModalSubmit()) {
@@ -401,7 +405,7 @@ async function presentOnboarding(interaction, embed, components = []) {
       await interaction.update(payload);
       return;
     } catch {
-      await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ ...payload, flags: ephemeralV2 });
       return;
     }
   }
@@ -412,7 +416,7 @@ async function presentOnboarding(interaction, embed, components = []) {
   }
 
   if (interaction.isButton()) {
-    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ ...payload, flags: ephemeralV2 });
     return;
   }
 
@@ -470,11 +474,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'onboarding-panel') {
-        await interaction.reply({
-          embeds: [welcomeEmbed()],
-          components: welcomeComponents(),
-          files: [cardAttachment('step1.png')],
-        });
+        await interaction.reply(panelPayload(welcomeEmbed(), welcomeComponents()));
         return;
       }
 
@@ -484,8 +484,8 @@ client.on(Events.InteractionCreate, async interaction => {
           content: 'Your test onboarding session has been reset.',
           flags: MessageFlags.Ephemeral,
         });
+        return;
       }
-      return;
     }
 
     if (interaction.isModalSubmit()) {
